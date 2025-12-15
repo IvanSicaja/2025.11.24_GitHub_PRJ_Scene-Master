@@ -2,7 +2,7 @@ a```text
 project-name/     
 │
 ├── assets/               # Additional project resources
-│   ├── media/            # Images, diagrams, videos
+│   ├── media/            # Images, diagrams, videos, sounds, icons
 │   └── 3d-modeling/      # 3D objects (STL, GLB, etc.)     
 │
 ├── copyright/            # All license info, authors, contributors, attributions
@@ -21,9 +21,7 @@ project-name/
 ├── notebooks/            # Jupyter/Colab notebooks (archived snapshots)
 │
 ├── publish/              # Final deliverables for sharing
-│   ├── main.exe          # Final executable
-│   ├── main.spec         # Build definition
-│   └── build/            # Temporary (can be deleted anytime)
+│   └── main.exe          # Final executable
 │
 ├── scripts/              # Development and experimental scripts
 │
