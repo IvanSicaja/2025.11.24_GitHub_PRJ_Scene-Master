@@ -1,8 +1,8 @@
-**🧾 🎯 Role title:** **Drone Development Team Lead – Barcelona Smart Drone Challenge 2019  
-📍 Location:** Aero-association Split, Ruđera Boškovića 32, HR-21000 Split, Croatia  
-**📅 Project Timeline:** Dec 2018 – May 2019  
-🎥 YouTube Demo: Not available  
-📦 GitHub: <https://github.com/IvanSicaja/2018.12.01_GitHub_Barcelona-Smart-Drone-Challenge-2019>  
+**🧾 🎯 Project Title: SCENE MASTER  
+📅 Project Timeline:** Nov 2025 - Dec 2025  
+🎥 YouTube Demo: Not available.  
+📦 GitHub Source Code: <https://github.com/IvanSicaja/2025.11.24_GitHub_PRJ_Scene-Master/tree/main>
+
 \----------------------------------------------------------------------------------------------------------------
 
 🏷️ My Personal Profiles: ⬇︎  
@@ -12,24 +12,32 @@
 🎥 YouTube: <https://www.youtube.com/@ivan_sicaja>  
 \----------------------------------------------------------------------------------------------------------------
 
-📚🔍 **Project Description:**
+### 📚🔍 Project description: ⬇︎⬇︎⬇︎
 
-💡 **Role/Project Description:**  
-As **Team Lead** for the **Barcelona Smart Drone Challenge 2019**, I aimed **to coordinate multidisciplinary teams** including the **Battery & Propulsion Systems team**, **Radio Communication & Signal Encryption team**, **Drone Frame Design team**, **Autopilot team**, **Object Detection team**, and **Delivery team**, ensuring seamless integration across all **UAV subsystems**:
+### 💡 App Purpose
 
-- **To lead** the **Battery & Propulsion Systems team** to design and optimize **motors, propellers, batteries, and ESCs** for endurance and efficiency using **eCalc.ch**.
-- **To implement** **secure digital radio communication** with **signal encryption**, coordinating the **Radio Communication & Signal Encryption team**.
-- **To supervise** the **Drone Frame Design team** in creating a **lightweight, aerodynamic, and durable structure**.
-- **To guide** the **Autopilot team** in integrating **ArduPilot Mission Planner, Pixhawk, and Odroid**, enabling **fully autonomous flight**.
-- **To oversee** the **Object Detection team** for accurate **ground target recognition**.
-- **To coordinate** the **Delivery team**, ensuring precise and reliable **autonomous package delivery**.
-- **To ensure** smooth **multidisciplinary collaboration**, balancing technical innovation with competition constraints.
+Desktop tool for organizing, sequencing, and renaming image scenes (e.g., storyboards, animations, photo flows) with drag-and-drop precision and advanced search.
 
-⚠️ **Note:**  
-Due to **insufficient sponsorship**, the team **did not participate in the tournament**.
+### 🧠 How It Works
 
-🔧 **Tech Stack:**  
-**Drone Development, Battery & Propulsion Systems, eCalc.ch, Digital Radio Communication, Signal Encryption, Drone Frame Design, ArduPilot Mission Planner, Pixhawk, Odroid, Autonomous Flight, Object Detection, Target Recognition, Package Delivery**
+Loads images from a folder into a sortable thumbnail grid. Supports natural drag-reordering, multi-selection moves (top/bottom), and safe bulk renaming (sequential or custom). Dual search bars enable fast filtering with up/down cycling. Double-left-click locks preview + fills search 1; double-right-click fills search 2 + unlocks. Smart clipboard integration on search fields (left-click: copy & clear; right-click: paste & clear). Keyboard arrows navigate thumbnails with live preview.
 
-📣 **Hashtags:**  
-\# #**DroneDevelopment** #**UAV** #**AutonomousSystems** #**PropulsionDesign** #**BatterySystems** #**RadioCommunication** #**SignalEncryption** #**FrameDesign** #**ArduPilot** #**Pixhawk** #**Odroid** #**SmartDroneChallenge** #**TeamLead** #**AerospaceEngineering** #**AutonomousFlight** #**ObjectDetection** #**PackageDelivery**
+### ⚠️ Note
+
+Developmental phase.
+
+### 🔧 Tech Stack
+
+Python, PyQt5, Qt (GUI/Layouts/Drag-Drop), QSettings (persistent storage), Natural Sorting
+
+### 📸 Project Snapshot
+
+Not available.
+
+### 🎥 Video Demonstration
+
+Not available.
+
+### 📣 Hashtags Section
+
+\# #Python #PyQt5 #DesktopApp #ImageOrganizer #SceneFlow #StoryboardTool #DragAndDrop #GUI #Productivity #ImageSequencing #GitHub #OpenSource

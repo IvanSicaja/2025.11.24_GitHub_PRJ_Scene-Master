@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 """
-Image Scene Flow Organizer - FINAL PERFECTED VERSION
+Image Scene Flow Organizer - ULTIMATE FIXED VERSION
 → All original features preserved
-→ Starts maximized + remembers window size/state across sessions
-→ Last folder remembered internally via QSettings (NO external file)
-→ Smart search bars: left-click copy+clear, right-click paste+clear
-→ Perfect search cycling with ↑/↓
-→ All other features 100% intact
+→ Opens FULL SCREEN reliably from first launch (using screen geometry)
+→ Remembers window size/state if you resize
+→ Left panel & preview have stable fixed sizes
+→ Keyboard arrow navigation (← →) with live preview update
+→ Internal QSettings (no files)
+→ Everything else 100% intact
 """
 import os
 import sys
 import re
 from PyQt5 import QtWidgets, QtGui, QtCore
 from PyQt5.QtCore import Qt, QSettings
-from PyQt5.QtWidgets import QAbstractItemView
+from PyQt5.QtWidgets import QAbstractItemView, QApplication
 
 SUPPORTED_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp", ".tif"}
 THUMB_MIN, THUMB_MAX, DEFAULT_THUMB = 60, 400, 180
@@ -23,7 +24,6 @@ def natural_key(s):
     return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', s)]
 
 class SmartLineEdit(QtWidgets.QLineEdit):
-    """Custom QLineEdit with clipboard functionality on mouse clicks"""
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             text = self.text()
@@ -62,6 +62,26 @@ class DragDropListWidget(QtWidgets.QListWidget):
         self.thumbnail_cache = {}
 
         self.itemDoubleClicked.connect(self.handle_double_click)
+        self.setFocusPolicy(Qt.StrongFocus)  # Enable keyboard navigation
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Left or event.key() == Qt.Key_Right:
+            current_row = self.currentRow()
+            total = self.count()
+            if total == 0:
+                return
+
+            if event.key() == Qt.Key_Left:
+                new_row = (current_row - 1) % total
+            else:
+                new_row = (current_row + 1) % total
+
+            self.setCurrentRow(new_row)
+            item = self.item(new_row)
+            self.scrollToItem(item, QAbstractItemView.PositionAtCenter)
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def handle_double_click(self, item):
         name = item.text()
@@ -159,18 +179,19 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         super().__init__()
         self.setWindowTitle("Image Scene Flow Organizer")
 
-        # Persistent settings (internal, no external file)
+        # Internal settings
         self.settings = QSettings("ImageSceneFlowOrganizer", "Settings")
 
-        # Restore window size, position, and maximized state
+        # Restore previous geometry/state if exists
         if self.settings.value("geometry"):
             self.restoreGeometry(self.settings.value("geometry"))
         if self.settings.value("windowState"):
             self.restoreState(self.settings.value("windowState"))
 
-        # If no saved state → start maximized by default
+        # If first run → force full screen using actual screen size
         if not self.settings.contains("geometry"):
-            self.showMaximized()
+            screen = QApplication.primaryScreen().availableGeometry()
+            self.setGeometry(screen)
 
         self.folder = None
         self.preview_locked = False
@@ -253,10 +274,11 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         search_layout2.addWidget(self.search_up_btn2)
         search_layout2.addWidget(self.search_down_btn2)
 
+        # Fixed-size preview
         self.preview = QtWidgets.QLabel("Preview\n(Double LEFT-click: lock | Double RIGHT-click: unlock)")
         self.preview.setAlignment(Qt.AlignCenter)
-        self.preview.setMinimumSize(400, 300)
-        self.preview.setMaximumHeight(400)
+        self.preview.setFixedHeight(420)  # Stable height
+        self.preview.setMinimumWidth(400)
         self.preview.setStyleSheet("""
             QLabel {
                 background: #0d1117;
@@ -296,20 +318,22 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         main_layout = QtWidgets.QHBoxLayout(central)
         left_widget = QtWidgets.QWidget()
         left_widget.setLayout(left_panel)
-        left_widget.setMaximumWidth(450)
+        left_widget.setFixedWidth(460)  # Fixed stable width
         main_layout.addWidget(left_widget)
         main_layout.addWidget(self.list, 1)
 
-        # Load last opened folder from internal settings
+        # Load last folder
         last_folder = self.settings.value("last_folder", "")
         if last_folder and os.path.isdir(last_folder):
             self.folder = last_folder
             self.load_folder_contents()
 
+        # Give focus to list for arrow keys
+        self.list.setFocus()
+
         self.show()
 
     def closeEvent(self, event):
-        # Save window geometry, state, and last folder
         self.settings.setValue("geometry", self.saveGeometry())
         self.settings.setValue("windowState", self.saveState())
         if self.folder:
