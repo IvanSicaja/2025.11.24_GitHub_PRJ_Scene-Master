@@ -5,9 +5,10 @@ Image Scene Flow Organizer - ENHANCED VERSION
 → Two search bars with up/down navigation
 → Double-click (left) on image → name goes to first search bar + LOCKS PREVIEW
 → Double-click (right) on image → name goes to second search bar + UNLOCKS PREVIEW
-→ RELOAD button: renames existing files (1,2,3...) then loads new filesash
+→ RELOAD button: renames existing files (1,2,3...) then loads new files
 → Remembers last opened folder
 → Extensions are stripped when copying names to search bars
+→ Smart search field click: left-click copies & clears, right-click clears & pastes
 """
 
 import os
@@ -47,6 +48,29 @@ def load_last_folder():
     except:
         pass
     return None
+
+
+class SmartLineEdit(QtWidgets.QLineEdit):
+    """Custom QLineEdit with clipboard functionality on mouse clicks"""
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            # Left click: copy text to clipboard, then clear
+            text = self.text()
+            if text:
+                clipboard = QtWidgets.QApplication.clipboard()
+                clipboard.setText(text)
+                self.clear()
+        elif event.button() == Qt.RightButton:
+            # Right click: clear and paste from clipboard
+            self.clear()
+            clipboard = QtWidgets.QApplication.clipboard()
+            clipboard_text = clipboard.text()
+            if clipboard_text:
+                self.setText(clipboard_text)
+
+        # Call the original mousePressEvent to maintain cursor positioning
+        super().mousePressEvent(event)
 
 
 class DragDropListWidget(QtWidgets.QListWidget):
@@ -173,9 +197,15 @@ class ImageOrganizer(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Image Scene Flow Organizer")
-        self.resize(1850, 1050)
+
+        # Start maximized (fullscreen)
+        self.showMaximized()
+
         self.folder = None
         self.preview_locked = False  # Track if preview is locked
+
+        # Track last search indices for each search bar
+        self.last_search_index = {1: -1, 2: -1}
 
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
@@ -225,9 +255,10 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         search1_label = QtWidgets.QLabel("Search 1 (Double Left-Click):")
         search1_label.setStyleSheet("font-weight: bold; color: #1976D2;")
 
-        self.search_input1 = QtWidgets.QLineEdit()
+        self.search_input1 = SmartLineEdit()
         self.search_input1.setPlaceholderText("Double left-click image to fill & lock")
         self.search_input1.returnPressed.connect(lambda: self.search_image(1, prev=False))
+        self.search_input1.textChanged.connect(lambda: self.reset_search_index(1))
 
         search_layout1 = QtWidgets.QHBoxLayout()
         self.search_up_btn1 = QtWidgets.QPushButton("↑")
@@ -242,9 +273,10 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         search2_label = QtWidgets.QLabel("Search 2 (Double Right-Click):")
         search2_label.setStyleSheet("font-weight: bold; color: #C62828;")
 
-        self.search_input2 = QtWidgets.QLineEdit()
+        self.search_input2 = SmartLineEdit()
         self.search_input2.setPlaceholderText("Double right-click image to fill & unlock")
         self.search_input2.returnPressed.connect(lambda: self.search_image(2, prev=False))
+        self.search_input2.textChanged.connect(lambda: self.reset_search_index(2))
 
         search_layout2 = QtWidgets.QHBoxLayout()
         self.search_up_btn2 = QtWidgets.QPushButton("↑")
@@ -276,8 +308,8 @@ class ImageOrganizer(QtWidgets.QMainWindow):
 
         self.preview = QtWidgets.QLabel("Preview\n(Double LEFT-click: lock | Double RIGHT-click: unlock)")
         self.preview.setAlignment(Qt.AlignCenter)
-        self.preview.setMinimumSize(700, 420)
-        self.preview.setMaximumHeight(500)
+        self.preview.setMinimumSize(400, 300)
+        self.preview.setMaximumHeight(400)
         self.preview.setStyleSheet("""
             QLabel {
                 background: #0d1117;
@@ -299,7 +331,13 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.list.double_right_clicked.connect(self.handle_double_right_click)
 
         main_layout = QtWidgets.QHBoxLayout(central)
-        main_layout.addLayout(left_panel, 0)
+
+        # Create left panel widget with fixed width
+        left_widget = QtWidgets.QWidget()
+        left_widget.setLayout(left_panel)
+        left_widget.setMaximumWidth(450)  # 25% of typical 1920px width
+
+        main_layout.addWidget(left_widget)
         main_layout.addWidget(self.list, 1)
 
         # Try to load last folder on startup
@@ -307,6 +345,10 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         if last_folder:
             self.folder = last_folder
             self.load_folder_contents()
+
+    def reset_search_index(self, search_bar):
+        """Reset search index when search text changes"""
+        self.last_search_index[search_bar] = -1
 
     def handle_double_left_click(self, name, path):
         """Double left-click → put name WITHOUT EXTENSION in first search bar + lock preview"""
@@ -552,26 +594,50 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         QtWidgets.QMessageBox.information(self, "Success", f"Renamed and placed {len(new_items)} images perfectly!")
 
     def search_image(self, search_bar, prev=False):
-        """Search for image in specified search bar (1 or 2)"""
+        """Search for image in specified search bar (1 or 2) with proper cycling"""
         text = self.search_input1.text() if search_bar == 1 else self.search_input2.text()
         text = text.strip().lower()
-        if not text: return
-
-        current_row = 0
-        selected = self.list.selectedItems()
-        if selected:
-            current_row = self.list.row(selected[0])
-            current_row += -1 if prev else 1
+        if not text:
+            return
 
         total = self.list.count()
-        for offset in range(total):
-            idx = (current_row + offset) % total
-            item = self.list.item(idx)
-            if text in item.text().lower():
-                self.list.clearSelection()
-                item.setSelected(True)
-                self.list.scrollToItem(item, QAbstractItemView.PositionAtCenter)
-                break
+        if total == 0:
+            return
+
+        # Get the last search index for this search bar
+        start_index = self.last_search_index[search_bar]
+
+        # If this is the first search or text changed, start from current selection or beginning
+        if start_index == -1:
+            selected = self.list.selectedItems()
+            if selected:
+                start_index = self.list.row(selected[0])
+            else:
+                start_index = -1 if not prev else 0
+
+        # Search in the appropriate direction
+        if prev:
+            # Search upward (backward)
+            for offset in range(1, total + 1):
+                idx = (start_index - offset) % total
+                item = self.list.item(idx)
+                if text in item.text().lower():
+                    self.list.clearSelection()
+                    item.setSelected(True)
+                    self.list.scrollToItem(item, QAbstractItemView.PositionAtCenter)
+                    self.last_search_index[search_bar] = idx
+                    return
+        else:
+            # Search downward (forward)
+            for offset in range(1, total + 1):
+                idx = (start_index + offset) % total
+                item = self.list.item(idx)
+                if text in item.text().lower():
+                    self.list.clearSelection()
+                    item.setSelected(True)
+                    self.list.scrollToItem(item, QAbstractItemView.PositionAtCenter)
+                    self.last_search_index[search_bar] = idx
+                    return
 
 
 if __name__ == "__main__":
