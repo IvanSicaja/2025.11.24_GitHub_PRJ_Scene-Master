@@ -4,8 +4,9 @@ Image Scene Flow Organizer - ENHANCED VERSION
 → All original features preserved
 → Two search bars with up/down navigation
 → Double-click (left) on image → name goes to first search bar + LOCKS PREVIEW
-→ Double-click (right) on image → name goes to second search bar
-→ Locked preview persists until another image is double-left-clicked
+→ Double-click (right) on image → name goes to second search bar + UNLOCKS PREVIEW
+→ RELOAD button: renames existing files (1,2,3...) then loads new filesash
+→ Remembers last opened folder
 → Extensions are stripped when copying names to search bars
 """
 
@@ -19,10 +20,33 @@ from PyQt5.QtWidgets import QAbstractItemView
 SUPPORTED_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp", ".tif"}
 THUMB_MIN, THUMB_MAX, DEFAULT_THUMB = 60, 400, 180
 PADDING = 30
+SETTINGS_FILE = "image_organizer_settings.txt"
 
 
 def natural_key(s):
     return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', s)]
+
+
+def save_last_folder(folder_path):
+    """Save the last opened folder to a settings file"""
+    try:
+        with open(SETTINGS_FILE, 'w') as f:
+            f.write(folder_path)
+    except:
+        pass
+
+
+def load_last_folder():
+    """Load the last opened folder from settings file"""
+    try:
+        if os.path.exists(SETTINGS_FILE):
+            with open(SETTINGS_FILE, 'r') as f:
+                folder = f.read().strip()
+                if os.path.isdir(folder):
+                    return folder
+    except:
+        pass
+    return None
 
 
 class DragDropListWidget(QtWidgets.QListWidget):
@@ -166,6 +190,10 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         open_btn.setStyleSheet(btn_style + "background: #1976D2; color: white;")
         open_btn.clicked.connect(self.open_folder)
 
+        reload_btn = QtWidgets.QPushButton("Reload Folder")
+        reload_btn.setStyleSheet(btn_style + "background: #7B1FA2; color: white;")
+        reload_btn.clicked.connect(self.reload_folder)
+
         top_btn = QtWidgets.QPushButton("Move Selected to Top")
         top_btn.setStyleSheet(btn_style + "background: #2E7D32; color: white;")
         top_btn.clicked.connect(self.move_to_top)
@@ -198,7 +226,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         search1_label.setStyleSheet("font-weight: bold; color: #1976D2;")
 
         self.search_input1 = QtWidgets.QLineEdit()
-        self.search_input1.setPlaceholderText("Double left-click image to fill")
+        self.search_input1.setPlaceholderText("Double left-click image to fill & lock")
         self.search_input1.returnPressed.connect(lambda: self.search_image(1, prev=False))
 
         search_layout1 = QtWidgets.QHBoxLayout()
@@ -215,7 +243,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         search2_label.setStyleSheet("font-weight: bold; color: #C62828;")
 
         self.search_input2 = QtWidgets.QLineEdit()
-        self.search_input2.setPlaceholderText("Double right-click image to fill")
+        self.search_input2.setPlaceholderText("Double right-click image to fill & unlock")
         self.search_input2.returnPressed.connect(lambda: self.search_image(2, prev=False))
 
         search_layout2 = QtWidgets.QHBoxLayout()
@@ -229,6 +257,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
 
         # Add all widgets to left panel
         left_panel.addWidget(open_btn)
+        left_panel.addWidget(reload_btn)
         left_panel.addWidget(top_btn)
         left_panel.addWidget(bottom_btn)
         left_panel.addWidget(clear_btn)
@@ -245,7 +274,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         left_panel.addLayout(search_layout2)
         left_panel.addSpacing(25)
 
-        self.preview = QtWidgets.QLabel("Preview\n(Double left-click an image to lock preview)")
+        self.preview = QtWidgets.QLabel("Preview\n(Double LEFT-click: lock | Double RIGHT-click: unlock)")
         self.preview.setAlignment(Qt.AlignCenter)
         self.preview.setMinimumSize(700, 420)
         self.preview.setMaximumHeight(500)
@@ -273,9 +302,14 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         main_layout.addLayout(left_panel, 0)
         main_layout.addWidget(self.list, 1)
 
+        # Try to load last folder on startup
+        last_folder = load_last_folder()
+        if last_folder:
+            self.folder = last_folder
+            self.load_folder_contents()
+
     def handle_double_left_click(self, name, path):
         """Double left-click → put name WITHOUT EXTENSION in first search bar + lock preview"""
-        # Strip extension from name
         name_without_ext = os.path.splitext(name)[0]
         self.search_input1.setText(name_without_ext)
         self.preview_locked = True
@@ -288,29 +322,82 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             self.preview.setPixmap(scaled)
 
     def handle_double_right_click(self, name):
-        """Double right-click → put name WITHOUT EXTENSION in second search bar"""
-        # Strip extension from name
+        """Double right-click → put name WITHOUT EXTENSION in second search bar + UNLOCK preview"""
         name_without_ext = os.path.splitext(name)[0]
         self.search_input2.setText(name_without_ext)
+        self.preview_locked = False  # UNLOCK the preview
+        self.update_preview()  # Update preview immediately
 
     def open_folder(self):
-        folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Select Image Folder")
+        last_folder = load_last_folder()
+        start_dir = last_folder if last_folder else ""
+        folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Select Image Folder", start_dir)
         if not folder: return
         self.folder = folder
+        save_last_folder(folder)  # Save for next time
+        self.load_folder_contents()
+
+    def load_folder_contents(self):
+        """Load images from the current folder"""
+        if not self.folder:
+            return
+
         self.list.clear()
         self.list.thumbnail_cache.clear()
 
-        files = [f for f in os.listdir(folder) if os.path.splitext(f)[1].lower() in SUPPORTED_EXT]
+        files = [f for f in os.listdir(self.folder) if os.path.splitext(f)[1].lower() in SUPPORTED_EXT]
         files.sort(key=natural_key)
 
         for f in files:
-            path = os.path.join(folder, f)
+            path = os.path.join(self.folder, f)
             item = QtWidgets.QListWidgetItem(os.path.basename(f))
             item.setData(Qt.UserRole, path)
             item.setIcon(self.list.get_thumbnail_icon(path))
             self.list.addItem(item)
 
         self.setWindowTitle(f"Image Scene Flow Organizer — {len(files)} images")
+
+    def reload_folder(self):
+        """Reload folder: rename existing files first, then load all files including new ones"""
+        if not self.folder or self.list.count() == 0:
+            QtWidgets.QMessageBox.warning(self, "Error", "No folder loaded!")
+            return
+
+        reply = QtWidgets.QMessageBox.question(
+            self, "Reload Folder",
+            "This will:\n1. Rename all current images to 1,2,3...\n2. Load any new images from the folder\n\nContinue?",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+        )
+
+        if reply != QtWidgets.QMessageBox.Yes:
+            return
+
+        # STEP 1 — RENAME EXISTING FILES TO PRESERVE ORDER
+        temp_paths = []
+        for i in range(self.list.count()):
+            item = self.list.item(i)
+            old = item.data(Qt.UserRole)
+            ext = os.path.splitext(old)[1]
+            tmp = os.path.join(self.folder, f"__TMP_RENAME_{i}{ext}")
+            try:
+                os.rename(old, tmp)
+                temp_paths.append((tmp, ext))
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Error", f"Failed to rename: {e}")
+                return
+
+        # STEP 2 — FINAL SEQUENCE 1,2,3,...
+        for idx, (tmp, ext) in enumerate(temp_paths, start=1):
+            new = os.path.join(self.folder, f"{idx}{ext}")
+            try:
+                os.rename(tmp, new)
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Error", f"Failed to rename: {e}")
+                return
+
+        # STEP 3 — RELOAD ALL FILES (including new ones)
+        self.load_folder_contents()
+        QtWidgets.QMessageBox.information(self, "Success", "Folder reloaded! Existing files renamed, new files loaded.")
 
     def update_thumb_size(self, val):
         self.thumb_label.setText(f"Thumbnail Size: {val}px")
@@ -323,7 +410,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
 
         sel = self.list.selectedItems()
         if not sel:
-            self.preview.setText("Preview\n(Double left-click an image to lock preview)")
+            self.preview.setText("Preview\n(Double LEFT-click: lock | Double RIGHT-click: unlock)")
             self.preview.setPixmap(QtGui.QPixmap())
             return
         path = sel[0].data(Qt.UserRole)
