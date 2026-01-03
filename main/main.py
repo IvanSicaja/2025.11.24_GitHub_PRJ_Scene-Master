@@ -7,13 +7,14 @@ Image Scene Flow Organizer - ULTIMATE FIXED VERSION
 → Left panel & preview have stable fixed sizes
 → Keyboard arrow navigation (← →) with live preview update
 → Internal QSettings (no files)
+→ New: Folder status indicator below preview (sync status with icons)
 → Everything else 100% intact
 """
 import os
 import sys
 import re
 from PyQt5 import QtWidgets, QtGui, QtCore
-from PyQt5.QtCore import Qt, QSettings
+from PyQt5.QtCore import Qt, QSettings, QTimer
 from PyQt5.QtWidgets import QAbstractItemView, QApplication
 SUPPORTED_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp", ".tif"}
 THUMB_MIN, THUMB_MAX, DEFAULT_THUMB = 60, 400, 180
@@ -171,6 +172,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.folder = None
         self.preview_locked = False
         self.last_search_index = {1: -1, 2: -1}
+        self.current_folder_files = set()  # To track what was loaded initially
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
         left_panel = QtWidgets.QVBoxLayout()
@@ -248,6 +250,12 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                 font-weight: bold;
             }
         """)
+        # New: Folder sync status label (below preview)
+        self.status_label = QtWidgets.QLabel("No folder opened")
+        self.status_label.setAlignment(Qt.AlignCenter)
+        self.status_label.setStyleSheet("font-size: 13px; padding: 8px; color: #aaa;")
+        self.status_label.setFixedHeight(40)
+
         left_panel.addWidget(open_btn)
         left_panel.addWidget(reload_btn)
         left_panel.addWidget(top_btn)
@@ -266,6 +274,8 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         left_panel.addLayout(search_layout2)
         left_panel.addSpacing(25)
         left_panel.addWidget(self.preview)
+        left_panel.addSpacing(8)
+        left_panel.addWidget(self.status_label)  # New status indicator
         left_panel.addStretch()
         self.list = DragDropListWidget()
         self.list.itemSelectionChanged.connect(self.update_preview)
@@ -284,15 +294,24 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             self.load_folder_contents()
         # Give focus to list for arrow keys
         self.list.setFocus()
+
+        # Timer to periodically check for new files (every 5 seconds)
+        self.folder_watch_timer = QTimer(self)
+        self.folder_watch_timer.timeout.connect(self.check_for_new_files)
+        self.folder_watch_timer.start(5000)  # 5000 ms = 5 seconds
+
         self.show()
+
     def closeEvent(self, event):
         self.settings.setValue("geometry", self.saveGeometry())
         self.settings.setValue("windowState", self.saveState())
         if self.folder:
             self.settings.setValue("last_folder", self.folder)
         super().closeEvent(event)
+
     def reset_search_index(self, search_bar):
         self.last_search_index[search_bar] = -1
+
     def handle_double_left_click(self, name, path):
         name_without_ext = os.path.splitext(name)[0]
         self.search_input1.setText(name_without_ext)
@@ -302,11 +321,13 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             scaled = pix.scaled(self.preview.size() - QtCore.QSize(40, 40),
                                 Qt.KeepAspectRatio, Qt.SmoothTransformation)
             self.preview.setPixmap(scaled)
+
     def handle_double_right_click(self, name):
         name_without_ext = os.path.splitext(name)[0]
         self.search_input2.setText(name_without_ext)
         self.preview_locked = False
         self.update_preview()
+
     def open_folder(self):
         start_dir = self.folder or ""
         folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Select Image Folder", start_dir)
@@ -314,6 +335,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             return
         self.folder = folder
         self.load_folder_contents()
+
     def load_folder_contents(self):
         if not self.folder:
             return
@@ -327,7 +349,35 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             item.setData(Qt.UserRole, path)
             item.setIcon(self.list.get_thumbnail_icon(path))
             self.list.addItem(item)
+        # Store current file set for later comparison
+        self.current_folder_files = set(files)
+        self.update_status_label(in_sync=True)
         self.setWindowTitle(f"Image Scene Flow Organizer — {len(files)} images")
+
+    def check_for_new_files(self):
+        if not self.folder or not os.path.isdir(self.folder):
+            return
+        current_files = [f for f in os.listdir(self.folder) if os.path.splitext(f)[1].lower() in SUPPORTED_EXT]
+        current_set = set(current_files)
+        if current_set == self.current_folder_files:
+            self.update_status_label(in_sync=True)
+        else:
+            diff_count = len(current_set) - len(self.current_folder_files)
+            self.update_status_label(in_sync=False, new_count=diff_count)
+
+    def update_status_label(self, in_sync=True, new_count=0):
+        if not self.folder:
+            self.status_label.setText("No folder opened")
+            self.status_label.setStyleSheet("font-size: 13px; padding: 8px; color: #aaa;")
+            return
+
+        if in_sync:
+            self.status_label.setText("✓ All images in folder are loaded")
+            self.status_label.setStyleSheet("font-size: 13px; padding: 8px; color: #4CAF50; font-weight: bold;")
+        else:
+            self.status_label.setText(f"⚠ {new_count} new image(s) added – Reload recommended")
+            self.status_label.setStyleSheet("font-size: 13px; padding: 8px; color: #FF9800; font-weight: bold;")
+
     def reload_folder(self):
         if not self.folder or self.list.count() == 0:
             QtWidgets.QMessageBox.warning(self, "Error", "No folder loaded!")
@@ -408,11 +458,17 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         items.sort(key=lambda it: natural_key(it.text()))
         for it in items:
             self.list.addItem(it)
+        # Update tracked files and status
+        final_files = [f for f in os.listdir(self.folder) if os.path.splitext(f)[1].lower() in SUPPORTED_EXT]
+        self.current_folder_files = set(final_files)
+        self.update_status_label(in_sync=True)
         self.setWindowTitle(f"Image Scene Flow Organizer — {self.list.count()} images")
         QtWidgets.QMessageBox.information(self, "Success", f"Folder reloaded! Existing files renamed, {len(new_paths)} new files added and renamed to generic_.")
+
     def update_thumb_size(self, val):
         self.thumb_label.setText(f"Thumbnail Size: {val}px")
         self.list.setThumbnailSize(val)
+
     def update_preview(self):
         if self.preview_locked:
             return
@@ -427,6 +483,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             scaled = pix.scaled(self.preview.size() - QtCore.QSize(40, 40),
                                 Qt.KeepAspectRatio, Qt.SmoothTransformation)
             self.preview.setPixmap(scaled)
+
     def move_to_top(self):
         items = sorted(self.list.selectedItems(), key=lambda x: self.list.row(x))
         if not items: return
@@ -438,6 +495,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             item.setSelected(True)
         self.list.setUpdatesEnabled(True)
         self.list.scrollToTop()
+
     def move_to_bottom(self):
         items = sorted(self.list.selectedItems(), key=lambda x: self.list.row(x))
         if not items: return
@@ -450,6 +508,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             item.setSelected(True)
         self.list.setUpdatesEnabled(True)
         self.list.scrollToBottom()
+
     def rename_ordered(self):
         if not self.folder or self.list.count() == 0:
             QtWidgets.QMessageBox.warning(self, "Error", "No images loaded!")
@@ -474,6 +533,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             item.setText(os.path.basename(new))
             renamed += 1
         QtWidgets.QMessageBox.information(self, "Done", f"Renamed {renamed} images!")
+
     def rename_selected(self):
         sel = self.list.selectedItems()
         if not sel:
@@ -537,6 +597,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         if new_items:
             self.list.scrollToItem(new_items[0], QAbstractItemView.PositionAtCenter)
         QtWidgets.QMessageBox.information(self, "Success", f"Renamed and placed {len(new_items)} images perfectly!")
+
     def search_image(self, search_bar, prev=False):
         text = self.search_input1.text() if search_bar == 1 else self.search_input2.text()
         text = text.strip().lower()
@@ -563,6 +624,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                 self.last_search_index[search_bar] = current_idx
                 return
             current_idx = (current_idx + step) % total
+
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
     app.setStyle("Fusion")
