@@ -15,14 +15,11 @@ import re
 from PyQt5 import QtWidgets, QtGui, QtCore
 from PyQt5.QtCore import Qt, QSettings
 from PyQt5.QtWidgets import QAbstractItemView, QApplication
-
 SUPPORTED_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp", ".tif"}
 THUMB_MIN, THUMB_MAX, DEFAULT_THUMB = 60, 400, 180
 PADDING = 30
-
 def natural_key(s):
     return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', s)]
-
 class SmartLineEdit(QtWidgets.QLineEdit):
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -38,11 +35,9 @@ class SmartLineEdit(QtWidgets.QLineEdit):
             if clipboard_text:
                 self.setText(clipboard_text)
         super().mousePressEvent(event)
-
 class DragDropListWidget(QtWidgets.QListWidget):
     double_left_clicked = QtCore.pyqtSignal(str, str)
     double_right_clicked = QtCore.pyqtSignal(str)
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setViewMode(QtWidgets.QListWidget.IconMode)
@@ -55,39 +50,32 @@ class DragDropListWidget(QtWidgets.QListWidget):
         self.setResizeMode(QtWidgets.QListWidget.Adjust)
         self.setWrapping(True)
         self.setMovement(QtWidgets.QListWidget.Snap)
-
         self.thumbnail_size = DEFAULT_THUMB
         self.setIconSize(QtCore.QSize(self.thumbnail_size, self.thumbnail_size))
         self.setGridSize(QtCore.QSize(self.thumbnail_size + PADDING, self.thumbnail_size + PADDING + 50))
         self.thumbnail_cache = {}
-
         self.itemDoubleClicked.connect(self.handle_double_click)
-        self.setFocusPolicy(Qt.StrongFocus)  # Enable keyboard navigation
-
+        self.setFocusPolicy(Qt.StrongFocus) # Enable keyboard navigation
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Left or event.key() == Qt.Key_Right:
             current_row = self.currentRow()
             total = self.count()
             if total == 0:
                 return
-
             if event.key() == Qt.Key_Left:
                 new_row = (current_row - 1) % total
             else:
                 new_row = (current_row + 1) % total
-
             self.setCurrentRow(new_row)
             item = self.item(new_row)
             self.scrollToItem(item, QAbstractItemView.PositionAtCenter)
             event.accept()
             return
         super().keyPressEvent(event)
-
     def handle_double_click(self, item):
         name = item.text()
         path = item.data(Qt.UserRole)
         self.double_left_clicked.emit(name, path)
-
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.RightButton:
             item = self.itemAt(event.pos())
@@ -96,7 +84,6 @@ class DragDropListWidget(QtWidgets.QListWidget):
                 self.double_right_clicked.emit(name)
                 return
         super().mouseDoubleClickEvent(event)
-
     def setThumbnailSize(self, size: int):
         self.thumbnail_size = size
         self.setIconSize(QtCore.QSize(size, size))
@@ -106,7 +93,6 @@ class DragDropListWidget(QtWidgets.QListWidget):
             path = item.data(Qt.UserRole)
             if path:
                 item.setIcon(self.get_thumbnail_icon(path))
-
     def get_thumbnail_icon(self, path):
         if path in self.thumbnail_cache:
             return self.thumbnail_cache[path]
@@ -119,7 +105,6 @@ class DragDropListWidget(QtWidgets.QListWidget):
                 self.thumbnail_cache[path] = icon
                 return icon
         return QtGui.QIcon()
-
     def startDrag(self, supportedActions):
         selected = [i.row() for i in self.selectedIndexes()]
         drag_rows = sorted(set(selected))
@@ -135,19 +120,16 @@ class DragDropListWidget(QtWidgets.QListWidget):
         if first_item and not first_item.icon().isNull():
             drag.setPixmap(first_item.icon().pixmap(self.iconSize()))
         drag.exec_(Qt.MoveAction)
-
     def dragEnterEvent(self, e):
         if e.mimeData().hasFormat('application/x-drag-rows'):
             e.acceptProposedAction()
         else:
             e.ignore()
-
     def dragMoveEvent(self, e):
         if e.mimeData().hasFormat('application/x-drag-rows'):
             e.acceptProposedAction()
         else:
             e.ignore()
-
     def dropEvent(self, e):
         if not e.mimeData().hasFormat('application/x-drag-rows'):
             return super().dropEvent(e)
@@ -156,12 +138,10 @@ class DragDropListWidget(QtWidgets.QListWidget):
         except:
             e.ignore(); return
         if not drag_rows: e.ignore(); return
-
         pos = e.pos()
         target_item = self.itemAt(pos)
         target_row = self.row(target_item) if target_item else self.count()
         if target_row in drag_rows: e.ignore(); return
-
         insert_at = target_row if target_row <= max(drag_rows) else target_row - len(drag_rows)
         dragged_items = []
         for r in reversed(sorted(drag_rows)):
@@ -173,74 +153,57 @@ class DragDropListWidget(QtWidgets.QListWidget):
         for i in range(len(dragged_items)):
             self.item(insert_at + i).setSelected(True)
         e.acceptProposedAction()
-
 class ImageOrganizer(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Image Scene Flow Organizer")
-
         # Internal settings
         self.settings = QSettings("ImageSceneFlowOrganizer", "Settings")
-
         # Restore previous geometry/state if exists
         if self.settings.value("geometry"):
             self.restoreGeometry(self.settings.value("geometry"))
         if self.settings.value("windowState"):
             self.restoreState(self.settings.value("windowState"))
-
         # If first run → force full screen using actual screen size
         if not self.settings.contains("geometry"):
             screen = QApplication.primaryScreen().availableGeometry()
             self.setGeometry(screen)
-
         self.folder = None
         self.preview_locked = False
         self.last_search_index = {1: -1, 2: -1}
-
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
-
         left_panel = QtWidgets.QVBoxLayout()
         left_panel.setSpacing(10)
         left_panel.setContentsMargins(15, 15, 15, 15)
-
         btn_style = "QPushButton { padding: 10px 16px; font-weight: bold; font-size: 13px; border-radius: 6px; margin: 3px 0; }"
-
         open_btn = QtWidgets.QPushButton("Open Folder")
         open_btn.setStyleSheet(btn_style + "background: #1976D2; color: white;")
         open_btn.clicked.connect(self.open_folder)
-
         reload_btn = QtWidgets.QPushButton("Reload Folder")
         reload_btn.setStyleSheet(btn_style + "background: #7B1FA2; color: white;")
         reload_btn.clicked.connect(self.reload_folder)
-
         top_btn = QtWidgets.QPushButton("Move Selected to Top")
         top_btn.setStyleSheet(btn_style + "background: #2E7D32; color: white;")
         top_btn.clicked.connect(self.move_to_top)
-
         bottom_btn = QtWidgets.QPushButton("Move Selected to Bottom")
         bottom_btn.setStyleSheet(btn_style + "background: #C62828; color: white;")
         bottom_btn.clicked.connect(self.move_to_bottom)
-
         clear_btn = QtWidgets.QPushButton("Clear Selection")
         clear_btn.setStyleSheet(btn_style + "background: #757575; color: white;")
         clear_btn.clicked.connect(lambda: self.list.clearSelection())
-
         rename_all_btn = QtWidgets.QPushButton("Rename All")
         rename_all_btn.setStyleSheet(btn_style + "background: #F57C00; color: white;")
         rename_all_btn.clicked.connect(self.rename_ordered)
-
         rename_selected_btn = QtWidgets.QPushButton("Rename Selected")
         rename_selected_btn.setStyleSheet(btn_style + "background: #0288D1; color: white;")
         rename_selected_btn.clicked.connect(self.rename_selected)
-
         self.thumb_label = QtWidgets.QLabel(f"Thumbnail Size: {DEFAULT_THUMB}px")
         self.thumb_label.setStyleSheet("font-size: 13px; color: #333;")
         self.thumb_slider = QtWidgets.QSlider(Qt.Horizontal)
         self.thumb_slider.setRange(THUMB_MIN, THUMB_MAX)
         self.thumb_slider.setValue(DEFAULT_THUMB)
         self.thumb_slider.valueChanged.connect(self.update_thumb_size)
-
         # Search bars
         search1_label = QtWidgets.QLabel("Search 1 (Double Left-Click):")
         search1_label.setStyleSheet("font-weight: bold; color: #1976D2;")
@@ -248,7 +211,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.search_input1.setPlaceholderText("Double left-click → fill & lock | LClick: copy+clear | RClick: paste")
         self.search_input1.returnPressed.connect(lambda: self.search_image(1, prev=False))
         self.search_input1.textChanged.connect(lambda: self.reset_search_index(1))
-
         search_layout1 = QtWidgets.QHBoxLayout()
         self.search_up_btn1 = QtWidgets.QPushButton("↑")
         self.search_down_btn1 = QtWidgets.QPushButton("↓")
@@ -257,14 +219,12 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         search_layout1.addWidget(self.search_input1)
         search_layout1.addWidget(self.search_up_btn1)
         search_layout1.addWidget(self.search_down_btn1)
-
         search2_label = QtWidgets.QLabel("Search 2 (Double Right-Click):")
         search2_label.setStyleSheet("font-weight: bold; color: #C62828;")
         self.search_input2 = SmartLineEdit()
         self.search_input2.setPlaceholderText("Double right-click → fill & unlock | LClick: copy+clear | RClick: paste")
         self.search_input2.returnPressed.connect(lambda: self.search_image(2, prev=False))
         self.search_input2.textChanged.connect(lambda: self.reset_search_index(2))
-
         search_layout2 = QtWidgets.QHBoxLayout()
         self.search_up_btn2 = QtWidgets.QPushButton("↑")
         self.search_down_btn2 = QtWidgets.QPushButton("↓")
@@ -273,11 +233,10 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         search_layout2.addWidget(self.search_input2)
         search_layout2.addWidget(self.search_up_btn2)
         search_layout2.addWidget(self.search_down_btn2)
-
         # Fixed-size preview
         self.preview = QtWidgets.QLabel("Preview\n(Double LEFT-click: lock | Double RIGHT-click: unlock)")
         self.preview.setAlignment(Qt.AlignCenter)
-        self.preview.setFixedHeight(420)  # Stable height
+        self.preview.setFixedHeight(420) # Stable height
         self.preview.setMinimumWidth(400)
         self.preview.setStyleSheet("""
             QLabel {
@@ -289,7 +248,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                 font-weight: bold;
             }
         """)
-
         left_panel.addWidget(open_btn)
         left_panel.addWidget(reload_btn)
         left_panel.addWidget(top_btn)
@@ -309,40 +267,32 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         left_panel.addSpacing(25)
         left_panel.addWidget(self.preview)
         left_panel.addStretch()
-
         self.list = DragDropListWidget()
         self.list.itemSelectionChanged.connect(self.update_preview)
         self.list.double_left_clicked.connect(self.handle_double_left_click)
         self.list.double_right_clicked.connect(self.handle_double_right_click)
-
         main_layout = QtWidgets.QHBoxLayout(central)
         left_widget = QtWidgets.QWidget()
         left_widget.setLayout(left_panel)
-        left_widget.setFixedWidth(460)  # Fixed stable width
+        left_widget.setFixedWidth(460) # Fixed stable width
         main_layout.addWidget(left_widget)
         main_layout.addWidget(self.list, 1)
-
         # Load last folder
         last_folder = self.settings.value("last_folder", "")
         if last_folder and os.path.isdir(last_folder):
             self.folder = last_folder
             self.load_folder_contents()
-
         # Give focus to list for arrow keys
         self.list.setFocus()
-
         self.show()
-
     def closeEvent(self, event):
         self.settings.setValue("geometry", self.saveGeometry())
         self.settings.setValue("windowState", self.saveState())
         if self.folder:
             self.settings.setValue("last_folder", self.folder)
         super().closeEvent(event)
-
     def reset_search_index(self, search_bar):
         self.last_search_index[search_bar] = -1
-
     def handle_double_left_click(self, name, path):
         name_without_ext = os.path.splitext(name)[0]
         self.search_input1.setText(name_without_ext)
@@ -352,13 +302,11 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             scaled = pix.scaled(self.preview.size() - QtCore.QSize(40, 40),
                                 Qt.KeepAspectRatio, Qt.SmoothTransformation)
             self.preview.setPixmap(scaled)
-
     def handle_double_right_click(self, name):
         name_without_ext = os.path.splitext(name)[0]
         self.search_input2.setText(name_without_ext)
         self.preview_locked = False
         self.update_preview()
-
     def open_folder(self):
         start_dir = self.folder or ""
         folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Select Image Folder", start_dir)
@@ -366,7 +314,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             return
         self.folder = folder
         self.load_folder_contents()
-
     def load_folder_contents(self):
         if not self.folder:
             return
@@ -381,7 +328,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             item.setIcon(self.list.get_thumbnail_icon(path))
             self.list.addItem(item)
         self.setWindowTitle(f"Image Scene Flow Organizer — {len(files)} images")
-
     def reload_folder(self):
         if not self.folder or self.list.count() == 0:
             QtWidgets.QMessageBox.warning(self, "Error", "No folder loaded!")
@@ -393,35 +339,80 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         )
         if reply != QtWidgets.QMessageBox.Yes:
             return
-
         temp_paths = []
         for i in range(self.list.count()):
             item = self.list.item(i)
-            old = item.data(Qt.UserRole)
-            ext = os.path.splitext(old)[1]
-            tmp = os.path.join(self.folder, f"__TMP_RENAME_{i}{ext}")
+            old_path = item.data(Qt.UserRole)
+            ext = os.path.splitext(old_path)[1]
+            tmp_path = os.path.join(self.folder, f"__TMP_RENAME_{i}{ext}")
             try:
-                os.rename(old, tmp)
-                temp_paths.append((tmp, ext))
+                os.rename(old_path, tmp_path)
+                if old_path in self.list.thumbnail_cache:
+                    self.list.thumbnail_cache[tmp_path] = self.list.thumbnail_cache.pop(old_path)
+                item.setData(Qt.UserRole, tmp_path)
+                temp_paths.append((item, tmp_path, ext))
             except Exception as e:
                 QtWidgets.QMessageBox.critical(self, "Error", f"Failed to rename: {e}")
                 return
-
-        for idx, (tmp, ext) in enumerate(temp_paths, start=1):
-            new = os.path.join(self.folder, f"{idx}{ext}")
+        # Detect and rename new files to generic_000000.ext etc.
+        new_files = [f for f in os.listdir(self.folder) if os.path.splitext(f)[1].lower() in SUPPORTED_EXT and not f.startswith("__TMP_RENAME_")]
+        new_files.sort(key=natural_key)
+        new_paths = []
+        counter = 0
+        for f in new_files:
+            old_new_path = os.path.join(self.folder, f)
+            ext = os.path.splitext(f)[1]
+            new_name = f"generic_{counter:06d}{ext}"
+            new_path = os.path.join(self.folder, new_name)
+            while os.path.exists(new_path):
+                counter += 1
+                new_name = f"generic_{counter:06d}{ext}"
+                new_path = os.path.join(self.folder, new_name)
             try:
-                os.rename(tmp, new)
+                os.rename(old_new_path, new_path)
+                new_paths.append(new_path)
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Error", f"Failed to rename new file: {e}")
+                return
+            counter += 1
+        # Now rename existing from tmp to numeric
+        num_counter = 1
+        for (item, tmp_path, ext) in temp_paths:
+            new_name = f"{num_counter}{ext}"
+            new_path = os.path.join(self.folder, new_name)
+            while os.path.exists(new_path):
+                num_counter += 1
+                new_name = f"{num_counter}{ext}"
+                new_path = os.path.join(self.folder, new_name)
+            try:
+                os.rename(tmp_path, new_path)
+                item.setData(Qt.UserRole, new_path)
+                item.setText(new_name)
+                if tmp_path in self.list.thumbnail_cache:
+                    self.list.thumbnail_cache[new_path] = self.list.thumbnail_cache.pop(tmp_path)
             except Exception as e:
                 QtWidgets.QMessageBox.critical(self, "Error", f"Failed to rename: {e}")
                 return
-
-        self.load_folder_contents()
-        QtWidgets.QMessageBox.information(self, "Success", "Folder reloaded! Existing files renamed, new files loaded.")
-
+            num_counter += 1
+        # Add new items
+        for new_path in new_paths:
+            f = os.path.basename(new_path)
+            item = QtWidgets.QListWidgetItem(f)
+            item.setData(Qt.UserRole, new_path)
+            item.setIcon(self.list.get_thumbnail_icon(new_path))
+            self.list.addItem(item)
+        # Sort the entire list by natural key
+        items = []
+        for _ in range(self.list.count()):
+            items.append(self.list.takeItem(0))
+        items.sort(key=lambda it: natural_key(it.text()))
+        for it in items:
+            self.list.addItem(it)
+        self.setWindowTitle(f"Image Scene Flow Organizer — {self.list.count()} images")
+        QtWidgets.QMessageBox.information(self, "Success", f"Folder reloaded! Existing files renamed, {len(new_paths)} new files added and renamed to generic_.")
     def update_thumb_size(self, val):
         self.thumb_label.setText(f"Thumbnail Size: {val}px")
         self.list.setThumbnailSize(val)
-
     def update_preview(self):
         if self.preview_locked:
             return
@@ -436,7 +427,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             scaled = pix.scaled(self.preview.size() - QtCore.QSize(40, 40),
                                 Qt.KeepAspectRatio, Qt.SmoothTransformation)
             self.preview.setPixmap(scaled)
-
     def move_to_top(self):
         items = sorted(self.list.selectedItems(), key=lambda x: self.list.row(x))
         if not items: return
@@ -448,7 +438,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             item.setSelected(True)
         self.list.setUpdatesEnabled(True)
         self.list.scrollToTop()
-
     def move_to_bottom(self):
         items = sorted(self.list.selectedItems(), key=lambda x: self.list.row(x))
         if not items: return
@@ -461,7 +450,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             item.setSelected(True)
         self.list.setUpdatesEnabled(True)
         self.list.scrollToBottom()
-
     def rename_ordered(self):
         if not self.folder or self.list.count() == 0:
             QtWidgets.QMessageBox.warning(self, "Error", "No images loaded!")
@@ -486,7 +474,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             item.setText(os.path.basename(new))
             renamed += 1
         QtWidgets.QMessageBox.information(self, "Done", f"Renamed {renamed} images!")
-
     def rename_selected(self):
         sel = self.list.selectedItems()
         if not sel:
@@ -550,7 +537,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         if new_items:
             self.list.scrollToItem(new_items[0], QAbstractItemView.PositionAtCenter)
         QtWidgets.QMessageBox.information(self, "Success", f"Renamed and placed {len(new_items)} images perfectly!")
-
     def search_image(self, search_bar, prev=False):
         text = self.search_input1.text() if search_bar == 1 else self.search_input2.text()
         text = text.strip().lower()
@@ -559,7 +545,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         total = self.list.count()
         if total == 0:
             return
-
         start_index = self.last_search_index[search_bar]
         if start_index == -1:
             selected = self.list.selectedItems()
@@ -567,10 +552,8 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                 start_index = self.list.row(selected[0])
             else:
                 start_index = -1 if not prev else 0
-
         step = -1 if prev else 1
         current_idx = (start_index + step) % total
-
         for _ in range(total):
             item = self.list.item(current_idx)
             if item and text in item.text().lower():
@@ -580,7 +563,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                 self.last_search_index[search_bar] = current_idx
                 return
             current_idx = (current_idx + step) % total
-
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
     app.setStyle("Fusion")
