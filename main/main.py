@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Image Scene Flow Organizer - ULTIMATE FIXED VERSION
+Scenify - Image Scene Flow Organizer - ULTIMATE FIXED VERSION
 → All original features preserved
 → Opens MAXIMIZED reliably on first launch
 → Remembers window size/state/position if you resize/move
@@ -20,6 +20,8 @@ UPDATED:
 - FIXED: Thumbnail slider now actually resizes thumbnails progressively (not just padding)
 - FIXED: Preview maximized to full width (no left/right padding)
 - FIXED: Copyright moved to absolute bottom in standard professional position
+- NEW: Inline base name input below Rename Selected (no pop-up)
+- NEW: Digit count spinbox for controlling zero-padding digits
 """
 import os
 import sys
@@ -243,7 +245,7 @@ class DragDropListWidget(QtWidgets.QListWidget):
 class ImageOrganizer(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Image Scene Flow Organizer")
+        self.setWindowTitle("Scenify - Image Scene Flow Organizer")
         # Apply dark theme
         self.apply_dark_theme()
         self.settings = QSettings("ImageSceneFlowOrganizer", "Settings")
@@ -322,6 +324,106 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         rename_selected_btn = QtWidgets.QPushButton("Rename Selected")
         rename_selected_btn.setStyleSheet(blue_btn_style)
         rename_selected_btn.clicked.connect(self.rename_selected)
+
+        # ── NEW: Inline base name + digit count controls for Rename Selected ──
+        rename_options_frame = QtWidgets.QFrame()
+        rename_options_frame.setStyleSheet("""
+            QFrame {
+                background: #2c2c2e;
+                border: 1px solid #3a3a3c;
+                border-radius: 8px;
+            }
+        """)
+        rename_options_layout = QtWidgets.QVBoxLayout(rename_options_frame)
+        rename_options_layout.setContentsMargins(10, 8, 10, 8)
+        rename_options_layout.setSpacing(5)
+
+        rename_options_title = QtWidgets.QLabel("Rename Selected — Options")
+        rename_options_title.setStyleSheet(
+            "font-size: 10px; font-weight: 700; color: #636366; "
+            "background: transparent; border: none; letter-spacing: 0.5px;"
+        )
+        rename_options_layout.addWidget(rename_options_title)
+
+        base_name_label = QtWidgets.QLabel("Base Name:")
+        base_name_label.setStyleSheet(
+            "font-size: 11px; color: #a0a0a0; font-weight: 500; "
+            "background: transparent; border: none;"
+        )
+        self.rename_base_input = QtWidgets.QLineEdit()
+        self.rename_base_input.setPlaceholderText("e.g. garage, scene, shot ...")
+        self.rename_base_input.setStyleSheet("""
+            QLineEdit {
+                background-color: #1c1c1e;
+                border: 1px solid #3a3a3c;
+                border-radius: 6px;
+                padding: 5px 8px;
+                color: #e0e0e0;
+                font-size: 12px;
+                selection-background-color: #0066CC;
+            }
+            QLineEdit:focus { border: 1px solid #0066CC; }
+        """)
+
+        digits_row = QtWidgets.QHBoxLayout()
+        digits_label = QtWidgets.QLabel("Digit Count:")
+        digits_label.setStyleSheet(
+            "font-size: 11px; color: #a0a0a0; font-weight: 500; "
+            "background: transparent; border: none;"
+        )
+        self.digits_spinbox = QtWidgets.QSpinBox()
+        self.digits_spinbox.setRange(1, 10)
+        self.digits_spinbox.setValue(2)
+        self.digits_spinbox.setToolTip(
+            "Number of digits used for the numeric suffix.\n"
+            "e.g. 3 → garage_001, garage_002\n"
+            "     6 → garage_000001, garage_000002"
+        )
+        self.digits_spinbox.setStyleSheet("""
+            QSpinBox {
+                background-color: #1c1c1e;
+                border: 1px solid #3a3a3c;
+                border-radius: 6px;
+                padding: 4px 6px;
+                color: #e0e0e0;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            QSpinBox:focus { border: 1px solid #0066CC; }
+            QSpinBox::up-button, QSpinBox::down-button {
+                background: #3a3a3c;
+                border: none;
+                border-radius: 3px;
+                width: 18px;
+            }
+            QSpinBox::up-button:hover, QSpinBox::down-button:hover {
+                background: #0066CC;
+            }
+        """)
+        digits_example_label = QtWidgets.QLabel()
+        digits_example_label.setStyleSheet(
+            "font-size: 10px; color: #636366; background: transparent; border: none;"
+        )
+
+        def update_digits_example():
+            base = self.rename_base_input.text().strip() or "name"
+            d = self.digits_spinbox.value()
+            example = f"{base}_{'1'.zfill(d)}, {base}_{'2'.zfill(d)}"
+            digits_example_label.setText(f"→ {example}")
+
+        self.digits_spinbox.valueChanged.connect(update_digits_example)
+        self.rename_base_input.textChanged.connect(update_digits_example)
+        update_digits_example()
+
+        digits_row.addWidget(digits_label)
+        digits_row.addWidget(self.digits_spinbox)
+        digits_row.addStretch()
+
+        rename_options_layout.addWidget(base_name_label)
+        rename_options_layout.addWidget(self.rename_base_input)
+        rename_options_layout.addLayout(digits_row)
+        rename_options_layout.addWidget(digits_example_label)
+        # ── END NEW controls ──
 
         self.thumb_label = QtWidgets.QLabel(f"Thumbnail Size: {DEFAULT_THUMB}px")
         self.thumb_label.setStyleSheet("font-size: 12px; color: #e0e0e0; font-weight: 500;")
@@ -434,6 +536,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         left_panel.addWidget(clear_btn)
         left_panel.addWidget(rename_all_btn)
         left_panel.addWidget(rename_selected_btn)
+        left_panel.addWidget(rename_options_frame)   # ← NEW inline options block
         left_panel.addSpacing(6)
         left_panel.addWidget(self.thumb_label)
         left_panel.addWidget(self.thumb_slider)
@@ -588,7 +691,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.progress_bar.setVisible(False)
         self.current_folder_files = set(files)
         self.update_status_label(in_sync=True)
-        self.setWindowTitle(f"Image Scene Flow Organizer — {len(files)} images")
+        self.setWindowTitle(f"Scenify - Image Scene Flow Organizer — {len(files)} images")
 
     def check_for_new_files(self):
         if not self.folder or not os.path.isdir(self.folder):
@@ -722,7 +825,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         final_files = [f for f in os.listdir(self.folder) if os.path.splitext(f)[1].lower() in SUPPORTED_EXT]
         self.current_folder_files = set(final_files)
         self.update_status_label(in_sync=True)
-        self.setWindowTitle(f"Image Scene Flow Organizer — {self.list.count()} images")
+        self.setWindowTitle(f"Scenify - Image Scene Flow Organizer — {self.list.count()} images")
         QtWidgets.QMessageBox.information(self, "Success",
                                           f"Folder reloaded! Existing files renamed, {len(new_paths)} new files added.")
 
@@ -811,16 +914,32 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         if not sel:
             QtWidgets.QMessageBox.warning(self, "No Selection", "Please select at least one image.")
             return
-        base, ok = QtWidgets.QInputDialog.getText(self, "Rename Selected", "Enter base name (e.g. 0):")
-        if not ok or not base.strip():
+
+        # Read base name from the inline input instead of a pop-up dialog
+        base = self.rename_base_input.text().strip()
+        if not base:
+            QtWidgets.QMessageBox.warning(
+                self, "No Base Name",
+                "Please enter a base name in the 'Base Name' field below the Rename Selected button."
+            )
+            self.rename_base_input.setFocus()
             return
-        base = base.strip()
+
+        # Read digit count from the spinbox
+        digits = self.digits_spinbox.value()
+
         renamed_items = sorted(sel, key=lambda x: self.list.row(x))
         max_counter = 0
-        pattern = re.compile(rf"^{re.escape(base)}_(\d{{6}})\.[a-zA-Z]{{3,4}}$", re.IGNORECASE)
+        pattern = re.compile(
+            rf"^{re.escape(base)}_(\d{{{digits}}})\.[a-zA-Z]{{3,4}}$", re.IGNORECASE
+        )
+        # Also match any digit-length variant so we don't clash with existing files
+        pattern_any = re.compile(
+            rf"^{re.escape(base)}_(\d+)\.[a-zA-Z]{{3,4}}$", re.IGNORECASE
+        )
         for i in range(self.list.count()):
             name = self.list.item(i).text()
-            match = pattern.match(name)
+            match = pattern_any.match(name)
             if match:
                 max_counter = max(max_counter, int(match.group(1)))
         counter = max_counter + 1
@@ -831,10 +950,10 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             if not os.path.exists(old_path):
                 continue
             ext = os.path.splitext(old_path)[1]
-            new_name = f"{base}_{counter:06d}{ext}"
+            new_name = f"{base}_{str(counter).zfill(digits)}{ext}"
             while new_name in used_names:
                 counter += 1
-                new_name = f"{base}_{counter:06d}{ext}"
+                new_name = f"{base}_{str(counter).zfill(digits)}{ext}"
             new_path = os.path.join(self.folder, new_name)
             try:
                 os.rename(old_path, new_path)
