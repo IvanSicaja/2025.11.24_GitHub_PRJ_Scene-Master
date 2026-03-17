@@ -261,7 +261,7 @@ PROGRESS_ACTIVE_STYLE = """
 class ImageOrganizer(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Scenify — Image Scene Flow Organizer  |  Developed by Ivan Sicaja © 2026. All rights reserved.")
+        self.setWindowTitle("Scenify — Image Scene Flow Organizer  ·  Developed by Ivan Sicaja © 2026")
         self.apply_dark_theme()
         self.settings = QSettings("ImageSceneFlowOrganizer", "Settings")
         geometry = self.settings.value("geometry")
@@ -412,14 +412,36 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                 font-weight: 600;
             }
             QSpinBox:focus { border: 1px solid #0066CC; }
-            QSpinBox::up-button, QSpinBox::down-button {
+            QSpinBox::up-button {
                 background: #3a3a3c;
                 border: none;
-                border-radius: 3px;
-                width: 18px;
+                border-top-right-radius: 5px;
+                width: 22px;
+                subcontrol-origin: border;
+                subcontrol-position: top right;
             }
-            QSpinBox::up-button:hover, QSpinBox::down-button:hover {
-                background: #0066CC;
+            QSpinBox::down-button {
+                background: #3a3a3c;
+                border: none;
+                border-bottom-right-radius: 5px;
+                width: 22px;
+                subcontrol-origin: border;
+                subcontrol-position: bottom right;
+            }
+            QSpinBox::up-button:hover, QSpinBox::down-button:hover { background: #0066CC; }
+            QSpinBox::up-arrow {
+                image: none;
+                width: 0; height: 0;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-bottom: 5px solid #e0e0e0;
+            }
+            QSpinBox::down-arrow {
+                image: none;
+                width: 0; height: 0;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 5px solid #e0e0e0;
             }
         """)
         digits_example_label = QtWidgets.QLabel()
@@ -453,15 +475,69 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         rename_options_layout.addLayout(digits_row)
         rename_options_layout.addWidget(digits_example_label)
 
-        # Thumbnail slider
-        self.thumb_label = QtWidgets.QLabel(f"Thumbnail Size: {DEFAULT_THUMB}px")
+        # Thumbnail size — label + linked spinbox + slider
+        self.thumb_label = QtWidgets.QLabel("Thumbnail Size:")
         self.thumb_label.setStyleSheet("font-size: 11px; color: #e0e0e0; font-weight: 500;")
+
+        self.thumb_spinbox = QtWidgets.QSpinBox()
+        self.thumb_spinbox.setRange(THUMB_MIN, THUMB_MAX)
+        self.thumb_spinbox.setValue(DEFAULT_THUMB)
+        self.thumb_spinbox.setFixedSize(58, 24)
+        self.thumb_spinbox.setSuffix(" px")
+        self.thumb_spinbox.setStyleSheet("""
+            QSpinBox {
+                background-color: #1c1c1e;
+                border: 1px solid #3a3a3c;
+                border-radius: 5px;
+                padding: 2px 4px;
+                color: #e0e0e0;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QSpinBox:focus { border: 1px solid #0066CC; }
+            QSpinBox::up-button {
+                background: #3a3a3c;
+                border: none;
+                border-top-right-radius: 4px;
+                width: 18px;
+                subcontrol-origin: border;
+                subcontrol-position: top right;
+            }
+            QSpinBox::down-button {
+                background: #3a3a3c;
+                border: none;
+                border-bottom-right-radius: 4px;
+                width: 18px;
+                subcontrol-origin: border;
+                subcontrol-position: bottom right;
+            }
+            QSpinBox::up-button:hover, QSpinBox::down-button:hover { background: #0066CC; }
+            QSpinBox::up-arrow {
+                image: none;
+                width: 0; height: 0;
+                border-left: 3px solid transparent;
+                border-right: 3px solid transparent;
+                border-bottom: 4px solid #e0e0e0;
+            }
+            QSpinBox::down-arrow {
+                image: none;
+                width: 0; height: 0;
+                border-left: 3px solid transparent;
+                border-right: 3px solid transparent;
+                border-top: 4px solid #e0e0e0;
+            }
+        """)
+
+        thumb_label_row = QtWidgets.QHBoxLayout()
+        thumb_label_row.setSpacing(6)
+        thumb_label_row.addWidget(self.thumb_label)
+        thumb_label_row.addStretch()
+        thumb_label_row.addWidget(self.thumb_spinbox)
 
         self.thumb_slider = QtWidgets.QSlider(Qt.Horizontal)
         self.thumb_slider.setRange(THUMB_MIN, THUMB_MAX)
         self.thumb_slider.setValue(DEFAULT_THUMB)
         self.thumb_slider.setFixedHeight(20)
-        self.thumb_slider.valueChanged.connect(self.update_thumb_size)
         self.thumb_slider.setStyleSheet("""
             QSlider::groove:horizontal {
                 background: #2a2a2a;
@@ -477,6 +553,11 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             }
             QSlider::handle:horizontal:hover { background: #007AFF; }
         """)
+
+        # Keep slider and spinbox in sync — both ways
+        self.thumb_slider.valueChanged.connect(self.update_thumb_size)
+        self.thumb_spinbox.valueChanged.connect(self._on_thumb_spinbox_changed)
+        self._thumb_syncing = False   # guard against recursive signals
 
         # Status label — compact single line
         self.status_label = QtWidgets.QLabel("No folder opened")
@@ -561,7 +642,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         inner_layout.addWidget(rename_selected_btn)
         inner_layout.addWidget(rename_options_frame)
         inner_layout.addSpacing(4)
-        inner_layout.addWidget(self.thumb_label)
+        inner_layout.addLayout(thumb_label_row)
         inner_layout.addWidget(self.thumb_slider)
         inner_layout.addSpacing(4)
         inner_layout.addWidget(self.status_label)
@@ -619,7 +700,14 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         left_panel_vbox.setSpacing(0)
         left_panel_vbox.addWidget(scroll_area)
         left_panel_vbox.addSpacing(3)
-        left_panel_vbox.addWidget(self.progress_bar)
+        # Wrap progress bar in a widget with matching right padding
+        progress_container = QtWidgets.QWidget()
+        progress_container.setStyleSheet("background: transparent;")
+        progress_hbox = QtWidgets.QHBoxLayout(progress_container)
+        progress_hbox.setContentsMargins(0, 0, 15, 4)
+        progress_hbox.setSpacing(0)
+        progress_hbox.addWidget(self.progress_bar)
+        left_panel_vbox.addWidget(progress_container)
         left_panel_vbox.addWidget(credit_label)
 
         # Image list (right side)
@@ -928,7 +1016,21 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                                           f"Folder reloaded! Existing files renamed, {len(new_paths)} new files added.")
 
     def update_thumb_size(self, val):
-        self.thumb_label.setText(f"Thumbnail Size: {val}px")
+        """Called when slider moves — updates spinbox and thumbnail grid."""
+        if self._thumb_syncing:
+            return
+        self._thumb_syncing = True
+        self.thumb_spinbox.setValue(val)
+        self._thumb_syncing = False
+        self.list.setThumbnailSize(val)
+
+    def _on_thumb_spinbox_changed(self, val):
+        """Called when spinbox changes — updates slider (which then calls update_thumb_size)."""
+        if self._thumb_syncing:
+            return
+        self._thumb_syncing = True
+        self.thumb_slider.setValue(val)
+        self._thumb_syncing = False
         self.list.setThumbnailSize(val)
 
     def update_preview(self):
