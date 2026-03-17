@@ -23,6 +23,7 @@ UPDATED:
 - NEW: Inline base name input below Rename Selected (no pop-up)
 - NEW: Digit count spinbox for controlling zero-padding digits
 - FIXED: Left panel wrapped in QScrollArea — window never grows, copyright always visible
+- FIXED: Progress bar always reserves its space (pinned above copyright), never shifts layout
 """
 import os
 import sys
@@ -80,7 +81,6 @@ class DragDropListWidget(QtWidgets.QListWidget):
         self.itemDoubleClicked.connect(self.handle_double_click)
         self.setFocusPolicy(Qt.StrongFocus)
 
-        # Progressive thumbnail regeneration
         self.resize_timer = QTimer()
         self.resize_timer.setSingleShot(True)
         self.resize_timer.timeout.connect(self.start_progressive_resize)
@@ -120,7 +120,6 @@ class DragDropListWidget(QtWidgets.QListWidget):
         super().mouseDoubleClickEvent(event)
 
     def setThumbnailSize(self, size: int):
-        """Called when slider changes - triggers progressive resize"""
         self.thumbnail_size = size
         self.setIconSize(QtCore.QSize(size, size))
         self.setGridSize(QtCore.QSize(size + PADDING, size + PADDING + 50))
@@ -220,6 +219,36 @@ class DragDropListWidget(QtWidgets.QListWidget):
         e.acceptProposedAction()
 
 
+# ── Progress bar style constants ──────────────────────────────────────────────
+# IDLE: bar occupies space but is visually invisible (transparent everything)
+PROGRESS_IDLE_STYLE = """
+    QProgressBar {
+        border: 2px solid transparent;
+        border-radius: 6px;
+        text-align: center;
+        background: transparent;
+        color: transparent;
+    }
+    QProgressBar::chunk { background: transparent; }
+"""
+# ACTIVE: green loading bar
+PROGRESS_ACTIVE_STYLE = """
+    QProgressBar {
+        border: 2px solid #3a3a3c;
+        border-radius: 6px;
+        text-align: center;
+        background: #1c1c1e;
+        color: #e0e0e0;
+        font-weight: 600;
+    }
+    QProgressBar::chunk {
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                    stop:0 #30d158, stop:1 #32d74b);
+        border-radius: 4px;
+    }
+"""
+
+
 class ImageOrganizer(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -242,7 +271,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
 
-        # ── Button styles ────────────────────────────────────────────────────
+        # ── Button styles ─────────────────────────────────────────────────────
         blue_btn_style = """
             QPushButton {
                 padding: 6px 12px;
@@ -272,7 +301,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             QPushButton:pressed { background: #2A2A2C; }
         """
 
-        # ── Buttons ──────────────────────────────────────────────────────────
+        # ── Buttons ───────────────────────────────────────────────────────────
         open_btn = QtWidgets.QPushButton("Open Folder")
         open_btn.setStyleSheet(blue_btn_style)
         open_btn.clicked.connect(self.open_folder)
@@ -301,7 +330,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         rename_selected_btn.setStyleSheet(blue_btn_style)
         rename_selected_btn.clicked.connect(self.rename_selected)
 
-        # ── Rename Selected inline options ───────────────────────────────────
+        # ── Rename Selected inline options ────────────────────────────────────
         rename_options_frame = QtWidgets.QFrame()
         rename_options_frame.setStyleSheet("""
             QFrame {
@@ -400,7 +429,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         rename_options_layout.addLayout(digits_row)
         rename_options_layout.addWidget(digits_example_label)
 
-        # ── Thumbnail slider ─────────────────────────────────────────────────
+        # ── Thumbnail slider ──────────────────────────────────────────────────
         self.thumb_label = QtWidgets.QLabel(f"Thumbnail Size: {DEFAULT_THUMB}px")
         self.thumb_label.setStyleSheet("font-size: 12px; color: #e0e0e0; font-weight: 500;")
 
@@ -424,29 +453,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             QSlider::handle:horizontal:hover { background: #007AFF; }
         """)
 
-        # ── Progress bar & status ────────────────────────────────────────────
-        self.progress_bar = QtWidgets.QProgressBar()
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        self.progress_bar.setTextVisible(True)
-        self.progress_bar.setFormat("Loading: %p%")
-        self.progress_bar.setStyleSheet("""
-            QProgressBar {
-                border: 2px solid #3a3a3c;
-                border-radius: 6px;
-                text-align: center;
-                background: #1c1c1e;
-                color: #e0e0e0;
-                font-weight: 600;
-                height: 20px;
-            }
-            QProgressBar::chunk {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #30d158, stop:1 #32d74b);
-                border-radius: 4px;
-            }
-        """)
-        self.progress_bar.setVisible(False)
-
+        # ── Status label ──────────────────────────────────────────────────────
         self.status_label = QtWidgets.QLabel("No folder opened")
         self.status_label.setAlignment(Qt.AlignCenter)
         self.status_label.setStyleSheet(
@@ -454,7 +461,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             "border-radius: 6px; border: 1px solid #3a3a3c;")
         self.status_label.setFixedHeight(32)
 
-        # ── Search bars ──────────────────────────────────────────────────────
+        # ── Search bars ───────────────────────────────────────────────────────
         search1_label = QtWidgets.QLabel("Search 1 (Double Left-Click):")
         search1_label.setStyleSheet("font-weight: 600; color: #0a84ff; font-size: 11px;")
 
@@ -489,7 +496,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         search_layout2.addWidget(self.search_up_btn2)
         search_layout2.addWidget(self.search_down_btn2)
 
-        # ── Preview ──────────────────────────────────────────────────────────
+        # ── Preview ───────────────────────────────────────────────────────────
         self.preview = QtWidgets.QLabel("Preview\n(Double LEFT-click: lock | Double RIGHT-click: unlock)")
         self.preview.setAlignment(Qt.AlignCenter)
         self.preview.setFixedHeight(350)
@@ -504,14 +511,13 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             }
         """)
 
-        # ── Build the scrollable inner widget ────────────────────────────────
-        # All controls go into scroll_content; copyright is OUTSIDE the scroll
-        # area so it is always visible at the very bottom.
+        # ── Scrollable inner content ──────────────────────────────────────────
+        # NOTE: progress bar is NOT inside the scroll area — it lives below it.
         scroll_content = QtWidgets.QWidget()
         scroll_content.setStyleSheet("background: transparent;")
         inner_layout = QtWidgets.QVBoxLayout(scroll_content)
         inner_layout.setSpacing(6)
-        inner_layout.setContentsMargins(0, 0, 6, 0)   # small right margin for scrollbar gap
+        inner_layout.setContentsMargins(0, 0, 6, 0)
 
         inner_layout.addWidget(open_btn)
         inner_layout.addWidget(reload_btn)
@@ -525,7 +531,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         inner_layout.addWidget(self.thumb_label)
         inner_layout.addWidget(self.thumb_slider)
         inner_layout.addSpacing(6)
-        inner_layout.addWidget(self.progress_bar)
         inner_layout.addWidget(self.status_label)
         inner_layout.addSpacing(8)
         inner_layout.addWidget(search1_label)
@@ -537,7 +542,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         inner_layout.addWidget(self.preview)
         inner_layout.addStretch()
 
-        # ── Scroll area (no expanding, fixed width) ───────────────────────────
+        # ── Scroll area ───────────────────────────────────────────────────────
         scroll_area = QtWidgets.QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setWidget(scroll_content)
@@ -560,21 +565,34 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
         """)
 
-        # ── Copyright — always pinned at the bottom, outside scroll ──────────
+        # ── Progress bar — ALWAYS in the layout, never hidden ─────────────────
+        # Starts transparent/idle; turns green during loading; back to idle when done.
+        # Space is always reserved — nothing ever shifts.
+        self.progress_bar = QtWidgets.QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFormat("")   # no text while idle
+        self.progress_bar.setFixedHeight(22)
+        self.progress_bar.setStyleSheet(PROGRESS_IDLE_STYLE)
+
+        # ── Copyright — pinned at the very bottom ─────────────────────────────
         credit_label = QtWidgets.QLabel("Developed by Ivan Sicaja © 2026. All rights reserved.")
         credit_label.setAlignment(Qt.AlignCenter)
         credit_label.setStyleSheet(
             "font-size: 9px; color: #636366; padding: 8px 0; "
             "border-top: 1px solid #2a2a2a; background: #1c1c1e;")
 
-        # ── Left panel container: scroll area + copyright ─────────────────────
+        # ── Left panel: [scroll area]  →  [progress bar]  →  [copyright] ─────
         left_panel_widget = QtWidgets.QWidget()
         left_panel_widget.setFixedWidth(460)
         left_panel_vbox = QtWidgets.QVBoxLayout(left_panel_widget)
         left_panel_vbox.setContentsMargins(15, 15, 0, 0)
         left_panel_vbox.setSpacing(0)
-        left_panel_vbox.addWidget(scroll_area)          # grows/shrinks freely
-        left_panel_vbox.addWidget(credit_label)         # always at bottom
+        left_panel_vbox.addWidget(scroll_area)          # flexible, fills space
+        left_panel_vbox.addSpacing(4)
+        left_panel_vbox.addWidget(self.progress_bar)    # fixed slot, always present
+        left_panel_vbox.addWidget(credit_label)         # always at the very bottom
 
         # ── Image list (right side) ───────────────────────────────────────────
         self.list = DragDropListWidget()
@@ -600,6 +618,19 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.folder_watch_timer.start(5000)
 
         self.show()
+
+    # ── Progress bar helpers ──────────────────────────────────────────────────
+    def _progress_start(self):
+        """Switch bar to active (green) state."""
+        self.progress_bar.setFormat("Loading: %p%")
+        self.progress_bar.setStyleSheet(PROGRESS_ACTIVE_STYLE)
+        self.progress_bar.setValue(0)
+
+    def _progress_done(self):
+        """Switch bar back to idle (invisible) state."""
+        self.progress_bar.setFormat("")
+        self.progress_bar.setValue(0)
+        self.progress_bar.setStyleSheet(PROGRESS_IDLE_STYLE)
 
     def apply_dark_theme(self):
         palette = QtGui.QPalette()
@@ -685,8 +716,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
     def load_folder_contents(self):
         if not self.folder:
             return
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setValue(0)
+        self._progress_start()
         QApplication.processEvents()
         self.list.clear()
         self.list.thumbnail_cache.clear()
@@ -702,7 +732,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             progress = int(((idx + 1) / total_files) * 100) if total_files > 0 else 100
             self.progress_bar.setValue(progress)
             QApplication.processEvents()
-        self.progress_bar.setVisible(False)
+        self._progress_done()
         self.current_folder_files = set(files)
         self.update_status_label(in_sync=True)
         self.setWindowTitle(f"Scenify - Image Scene Flow Organizer — {len(files)} images")
@@ -754,8 +784,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         )
         if reply != QtWidgets.QMessageBox.Yes:
             return
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setValue(0)
+        self._progress_start()
         QApplication.processEvents()
         temp_paths = []
         total_operations = self.list.count()
@@ -833,7 +862,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             self.list.addItem(it)
         self.progress_bar.setValue(100)
         QApplication.processEvents()
-        self.progress_bar.setVisible(False)
+        self._progress_done()
         final_files = [f for f in os.listdir(self.folder) if os.path.splitext(f)[1].lower() in SUPPORTED_EXT]
         self.current_folder_files = set(final_files)
         self.update_status_label(in_sync=True)
@@ -926,7 +955,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         if not sel:
             QtWidgets.QMessageBox.warning(self, "No Selection", "Please select at least one image.")
             return
-
         base = self.rename_base_input.text().strip()
         if not base:
             QtWidgets.QMessageBox.warning(
@@ -935,9 +963,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             )
             self.rename_base_input.setFocus()
             return
-
         digits = self.digits_spinbox.value()
-
         renamed_items = sorted(sel, key=lambda x: self.list.row(x))
         max_counter = 0
         pattern = re.compile(
