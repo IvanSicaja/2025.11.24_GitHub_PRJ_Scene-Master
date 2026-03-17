@@ -261,7 +261,7 @@ PROGRESS_ACTIVE_STYLE = """
 class ImageOrganizer(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Scenify - Image Scene Flow Organizer")
+        self.setWindowTitle("Scenify — Image Scene Flow Organizer  |  Developed by Ivan Sicaja © 2026. All rights reserved.")
         self.apply_dark_theme()
         self.settings = QSettings("ImageSceneFlowOrganizer", "Settings")
         geometry = self.settings.value("geometry")
@@ -608,10 +608,8 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.progress_bar.setStyleSheet(PROGRESS_IDLE_STYLE)
 
         # Copyright
-        credit_label = QtWidgets.QLabel("Developed by Ivan Sicaja © 2026. All rights reserved.")
-        credit_label.setAlignment(Qt.AlignCenter)
-        credit_label.setStyleSheet(
-            "font-size: 9px; color: #636366; padding: 6px 0; background: #1c1c1e;")
+        credit_label = QtWidgets.QLabel("")
+        credit_label.setFixedHeight(0)
 
         # Left panel
         left_panel_widget = QtWidgets.QWidget()
@@ -794,7 +792,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self._progress_done()
         self.current_folder_files = set(files)
         self.update_status_label(in_sync=True)
-        self.setWindowTitle(f"Scenify - Image Scene Flow Organizer - {len(files)} images")
+        self.setWindowTitle(f"Scenify — Image Scene Flow Organizer  ·  Developed by Ivan Sicaja © 2026")
 
     def check_for_new_files(self):
         if not self.folder or not os.path.isdir(self.folder):
@@ -925,7 +923,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         final_files = [f for f in os.listdir(self.folder) if os.path.splitext(f)[1].lower() in SUPPORTED_EXT]
         self.current_folder_files = set(final_files)
         self.update_status_label(in_sync=True)
-        self.setWindowTitle(f"Scenify - Image Scene Flow Organizer - {self.list.count()} images")
+        self.setWindowTitle(f"Scenify — Image Scene Flow Organizer  ·  Developed by Ivan Sicaja © 2026")
         QtWidgets.QMessageBox.information(self, "Success",
                                           f"Folder reloaded! Existing files renamed, {len(new_paths)} new files added.")
 
@@ -1037,7 +1035,11 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             if match:
                 max_counter = max(max_counter, int(match.group(1)))
         counter = 1
-        used_names = {self.list.item(i).text() for i in range(self.list.count())}
+        # Exclude the selected items' own current names from used_names.
+        # They are about to be renamed, so they must not block counter=1.
+        selected_texts = {item.text() for item in renamed_items}
+        used_names = {self.list.item(i).text() for i in range(self.list.count())
+                      if self.list.item(i).text() not in selected_texts}
         new_items = []
         for item in renamed_items:
             old_path = item.data(Qt.UserRole)
