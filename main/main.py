@@ -22,6 +22,7 @@ UPDATED:
 - FIXED: Copyright moved to absolute bottom in standard professional position
 - NEW: Inline base name input below Rename Selected (no pop-up)
 - NEW: Digit count spinbox for controlling zero-padding digits
+- FIXED: Left panel wrapped in QScrollArea — window never grows, copyright always visible
 """
 import os
 import sys
@@ -31,7 +32,7 @@ from PyQt5.QtCore import Qt, QSettings, QTimer
 from PyQt5.QtWidgets import QAbstractItemView, QApplication
 
 SUPPORTED_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp", ".tif"}
-THUMB_MIN, THUMB_MAX, DEFAULT_THUMB = 60, 400, 180
+THUMB_MIN, THUMB_MAX, DEFAULT_THUMB = 60, 400, 170
 PADDING = 30
 
 
@@ -121,62 +122,40 @@ class DragDropListWidget(QtWidgets.QListWidget):
     def setThumbnailSize(self, size: int):
         """Called when slider changes - triggers progressive resize"""
         self.thumbnail_size = size
-        # Immediately update icon and grid size (allocates space)
         self.setIconSize(QtCore.QSize(size, size))
         self.setGridSize(QtCore.QSize(size + PADDING, size + PADDING + 50))
-
-        # Stop any ongoing resize
         self.progressive_timer.stop()
-
-        # Clear cache to force regeneration at new size
         self.thumbnail_cache.clear()
-
-        # Restart from beginning
         self.resize_index = 0
-
-        # Delay start to debounce rapid slider movements
         self.resize_timer.stop()
-        self.resize_timer.start(150)  # Wait 150ms after last slider change
+        self.resize_timer.start(150)
 
     def start_progressive_resize(self):
-        """Start the progressive thumbnail regeneration"""
         self.resize_index = 0
         if self.count() > 0:
-            self.progressive_timer.start(0)  # Process as fast as possible
+            self.progressive_timer.start(0)
 
     def resize_next_thumbnail(self):
-        """Regenerate one thumbnail at a time"""
         if self.resize_index >= self.count():
-            # All done
             self.progressive_timer.stop()
             return
-
         item = self.item(self.resize_index)
         if item:
             path = item.data(Qt.UserRole)
             if path and os.path.exists(path):
-                # Generate new thumbnail at current size
                 icon = self.get_thumbnail_icon(path, force_regenerate=True)
                 item.setIcon(icon)
-
         self.resize_index += 1
-
-        # Process events every 10 thumbnails to keep UI responsive
         if self.resize_index % 10 == 0:
             QApplication.processEvents()
 
     def get_thumbnail_icon(self, path, force_regenerate=False):
-        """Get or generate thumbnail icon"""
-        # Check cache unless forced to regenerate
         if not force_regenerate and path in self.thumbnail_cache:
             cached_icon = self.thumbnail_cache[path]
-            # Verify cached icon is correct size
             if not cached_icon.isNull():
                 pixmap = cached_icon.pixmap(QtCore.QSize(self.thumbnail_size, self.thumbnail_size))
                 if pixmap.width() == self.thumbnail_size or pixmap.height() == self.thumbnail_size:
                     return cached_icon
-
-        # Generate new thumbnail
         if os.path.exists(path):
             pix = QtGui.QPixmap(path)
             if not pix.isNull():
@@ -185,7 +164,6 @@ class DragDropListWidget(QtWidgets.QListWidget):
                 icon = QtGui.QIcon(scaled)
                 self.thumbnail_cache[path] = icon
                 return icon
-
         return QtGui.QIcon()
 
     def startDrag(self, supportedActions):
@@ -246,7 +224,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Scenify - Image Scene Flow Organizer")
-        # Apply dark theme
         self.apply_dark_theme()
         self.settings = QSettings("ImageSceneFlowOrganizer", "Settings")
         geometry = self.settings.value("geometry")
@@ -261,13 +238,11 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.preview_locked = False
         self.last_search_index = {1: -1, 2: -1}
         self.current_folder_files = set()
+
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
-        left_panel = QtWidgets.QVBoxLayout()
-        left_panel.setSpacing(6)
-        left_panel.setContentsMargins(15, 15, 15, 0)  # No bottom margin - copyright goes there
 
-        # Compact blue buttons style
+        # ── Button styles ────────────────────────────────────────────────────
         blue_btn_style = """
             QPushButton {
                 padding: 6px 12px;
@@ -297,6 +272,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             QPushButton:pressed { background: #2A2A2C; }
         """
 
+        # ── Buttons ──────────────────────────────────────────────────────────
         open_btn = QtWidgets.QPushButton("Open Folder")
         open_btn.setStyleSheet(blue_btn_style)
         open_btn.clicked.connect(self.open_folder)
@@ -325,7 +301,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         rename_selected_btn.setStyleSheet(blue_btn_style)
         rename_selected_btn.clicked.connect(self.rename_selected)
 
-        # ── NEW: Inline base name + digit count controls for Rename Selected ──
+        # ── Rename Selected inline options ───────────────────────────────────
         rename_options_frame = QtWidgets.QFrame()
         rename_options_frame.setStyleSheet("""
             QFrame {
@@ -423,8 +399,8 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         rename_options_layout.addWidget(self.rename_base_input)
         rename_options_layout.addLayout(digits_row)
         rename_options_layout.addWidget(digits_example_label)
-        # ── END NEW controls ──
 
+        # ── Thumbnail slider ─────────────────────────────────────────────────
         self.thumb_label = QtWidgets.QLabel(f"Thumbnail Size: {DEFAULT_THUMB}px")
         self.thumb_label.setStyleSheet("font-size: 12px; color: #e0e0e0; font-weight: 500;")
 
@@ -448,7 +424,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             QSlider::handle:horizontal:hover { background: #007AFF; }
         """)
 
-        # Progress bar, status (compact)
+        # ── Progress bar & status ────────────────────────────────────────────
         self.progress_bar = QtWidgets.QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
@@ -478,6 +454,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             "border-radius: 6px; border: 1px solid #3a3a3c;")
         self.status_label.setFixedHeight(32)
 
+        # ── Search bars ──────────────────────────────────────────────────────
         search1_label = QtWidgets.QLabel("Search 1 (Double Left-Click):")
         search1_label.setStyleSheet("font-weight: 600; color: #0a84ff; font-size: 11px;")
 
@@ -512,11 +489,10 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         search_layout2.addWidget(self.search_up_btn2)
         search_layout2.addWidget(self.search_down_btn2)
 
-        # Preview with full width (no minimum width, maximizes available space)
+        # ── Preview ──────────────────────────────────────────────────────────
         self.preview = QtWidgets.QLabel("Preview\n(Double LEFT-click: lock | Double RIGHT-click: unlock)")
         self.preview.setAlignment(Qt.AlignCenter)
         self.preview.setFixedHeight(350)
-        # Removed setMinimumWidth - now uses full available width
         self.preview.setStyleSheet("""
             QLabel {
                 background: #1c1c1e;
@@ -528,49 +504,89 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             }
         """)
 
-        # Assemble left panel with compact spacing
-        left_panel.addWidget(open_btn)
-        left_panel.addWidget(reload_btn)
-        left_panel.addWidget(top_btn)
-        left_panel.addWidget(bottom_btn)
-        left_panel.addWidget(clear_btn)
-        left_panel.addWidget(rename_all_btn)
-        left_panel.addWidget(rename_selected_btn)
-        left_panel.addWidget(rename_options_frame)   # ← NEW inline options block
-        left_panel.addSpacing(6)
-        left_panel.addWidget(self.thumb_label)
-        left_panel.addWidget(self.thumb_slider)
-        left_panel.addSpacing(6)
-        left_panel.addWidget(self.progress_bar)
-        left_panel.addWidget(self.status_label)
-        left_panel.addSpacing(8)
-        left_panel.addWidget(search1_label)
-        left_panel.addLayout(search_layout1)
-        left_panel.addSpacing(4)
-        left_panel.addWidget(search2_label)
-        left_panel.addLayout(search_layout2)
-        left_panel.addSpacing(10)
-        left_panel.addWidget(self.preview)
-        left_panel.addStretch()  # Pushes copyright to bottom
+        # ── Build the scrollable inner widget ────────────────────────────────
+        # All controls go into scroll_content; copyright is OUTSIDE the scroll
+        # area so it is always visible at the very bottom.
+        scroll_content = QtWidgets.QWidget()
+        scroll_content.setStyleSheet("background: transparent;")
+        inner_layout = QtWidgets.QVBoxLayout(scroll_content)
+        inner_layout.setSpacing(6)
+        inner_layout.setContentsMargins(0, 0, 6, 0)   # small right margin for scrollbar gap
 
-        # Copyright at the very bottom - standard professional position
+        inner_layout.addWidget(open_btn)
+        inner_layout.addWidget(reload_btn)
+        inner_layout.addWidget(top_btn)
+        inner_layout.addWidget(bottom_btn)
+        inner_layout.addWidget(clear_btn)
+        inner_layout.addWidget(rename_all_btn)
+        inner_layout.addWidget(rename_selected_btn)
+        inner_layout.addWidget(rename_options_frame)
+        inner_layout.addSpacing(6)
+        inner_layout.addWidget(self.thumb_label)
+        inner_layout.addWidget(self.thumb_slider)
+        inner_layout.addSpacing(6)
+        inner_layout.addWidget(self.progress_bar)
+        inner_layout.addWidget(self.status_label)
+        inner_layout.addSpacing(8)
+        inner_layout.addWidget(search1_label)
+        inner_layout.addLayout(search_layout1)
+        inner_layout.addSpacing(4)
+        inner_layout.addWidget(search2_label)
+        inner_layout.addLayout(search_layout2)
+        inner_layout.addSpacing(10)
+        inner_layout.addWidget(self.preview)
+        inner_layout.addStretch()
+
+        # ── Scroll area (no expanding, fixed width) ───────────────────────────
+        scroll_area = QtWidgets.QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setWidget(scroll_content)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setFrameShape(QtWidgets.QFrame.NoFrame)
+        scroll_area.setStyleSheet("""
+            QScrollArea { background: transparent; border: none; }
+            QScrollBar:vertical {
+                background: #1c1c1e;
+                width: 8px;
+                border-radius: 4px;
+            }
+            QScrollBar::handle:vertical {
+                background: #3a3a3c;
+                border-radius: 4px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover { background: #0066CC; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+        """)
+
+        # ── Copyright — always pinned at the bottom, outside scroll ──────────
         credit_label = QtWidgets.QLabel("Developed by Ivan Sicaja © 2026. All rights reserved.")
         credit_label.setAlignment(Qt.AlignCenter)
         credit_label.setStyleSheet(
             "font-size: 9px; color: #636366; padding: 8px 0; "
-            "border-top: 1px solid #2a2a2a;")
-        left_panel.addWidget(credit_label)
+            "border-top: 1px solid #2a2a2a; background: #1c1c1e;")
 
+        # ── Left panel container: scroll area + copyright ─────────────────────
+        left_panel_widget = QtWidgets.QWidget()
+        left_panel_widget.setFixedWidth(460)
+        left_panel_vbox = QtWidgets.QVBoxLayout(left_panel_widget)
+        left_panel_vbox.setContentsMargins(15, 15, 0, 0)
+        left_panel_vbox.setSpacing(0)
+        left_panel_vbox.addWidget(scroll_area)          # grows/shrinks freely
+        left_panel_vbox.addWidget(credit_label)         # always at bottom
+
+        # ── Image list (right side) ───────────────────────────────────────────
         self.list = DragDropListWidget()
         self.list.itemSelectionChanged.connect(self.update_preview)
         self.list.double_left_clicked.connect(self.handle_double_left_click)
         self.list.double_right_clicked.connect(self.handle_double_right_click)
 
+        # ── Main layout ───────────────────────────────────────────────────────
         main_layout = QtWidgets.QHBoxLayout(central)
-        left_widget = QtWidgets.QWidget()
-        left_widget.setLayout(left_panel)
-        left_widget.setFixedWidth(460)
-        main_layout.addWidget(left_widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        main_layout.addWidget(left_panel_widget)
         main_layout.addWidget(self.list, 1)
 
         last_folder = self.settings.value("last_folder", "")
@@ -600,13 +616,11 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         palette.setColor(QtGui.QPalette.Link, QtGui.QColor(10, 132, 255))
         palette.setColor(QtGui.QPalette.Highlight, QtGui.QColor(10, 132, 255))
         palette.setColor(QtGui.QPalette.HighlightedText, QtGui.QColor(255, 255, 255))
-
         palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.WindowText, QtGui.QColor(127, 127, 127))
         palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.Text, QtGui.QColor(127, 127, 127))
         palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.ButtonText, QtGui.QColor(127, 127, 127))
         palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.Highlight, QtGui.QColor(58, 58, 60))
         palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.HighlightedText, QtGui.QColor(127, 127, 127))
-
         QApplication.setPalette(palette)
 
         app_stylesheet = """
@@ -698,7 +712,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             return
         current_files = [f for f in os.listdir(self.folder) if os.path.splitext(f)[1].lower() in SUPPORTED_EXT]
         current_set = set(current_files)
-
         if current_set == self.current_folder_files:
             self.update_status_label(in_sync=True)
         else:
@@ -713,7 +726,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                 "font-size: 11px; padding: 6px; color: #a0a0a0; background: #1c1c1e; "
                 "border-radius: 6px; border: 1px solid #3a3a3c;")
             return
-
         if in_sync:
             self.status_label.setText("✓ All images in folder are loaded")
             self.status_label.setStyleSheet(
@@ -915,7 +927,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, "No Selection", "Please select at least one image.")
             return
 
-        # Read base name from the inline input instead of a pop-up dialog
         base = self.rename_base_input.text().strip()
         if not base:
             QtWidgets.QMessageBox.warning(
@@ -925,7 +936,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             self.rename_base_input.setFocus()
             return
 
-        # Read digit count from the spinbox
         digits = self.digits_spinbox.value()
 
         renamed_items = sorted(sel, key=lambda x: self.list.row(x))
@@ -933,7 +943,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         pattern = re.compile(
             rf"^{re.escape(base)}_(\d{{{digits}}})\.[a-zA-Z]{{3,4}}$", re.IGNORECASE
         )
-        # Also match any digit-length variant so we don't clash with existing files
         pattern_any = re.compile(
             rf"^{re.escape(base)}_(\d+)\.[a-zA-Z]{{3,4}}$", re.IGNORECASE
         )
