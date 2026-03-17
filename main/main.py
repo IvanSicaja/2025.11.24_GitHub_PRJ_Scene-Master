@@ -358,7 +358,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         rename_options_layout.setContentsMargins(10, 6, 10, 6)
         rename_options_layout.setSpacing(4)
 
-        rename_options_title = QtWidgets.QLabel("Rename Selected — Options  (B: copy selected name)")
+        rename_options_title = QtWidgets.QLabel("Rename Selected — Options")
         rename_options_title.setStyleSheet(
             "font-size: 10px; font-weight: 700; color: #636366; "
             "background: transparent; border: none; letter-spacing: 0.3px;"
@@ -441,10 +441,17 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         digits_row.addWidget(self.digits_spinbox)
         digits_row.addStretch()
 
+        b_key_hint = QtWidgets.QLabel("Select a thumbnail and press B to load its name as Base Name.")
+        b_key_hint.setWordWrap(True)
+        b_key_hint.setStyleSheet(
+            "font-size: 10px; color: #636366; background: transparent; border: none;"
+        )
+
         rename_options_layout.addWidget(base_name_label)
         rename_options_layout.addWidget(self.rename_base_input)
         rename_options_layout.addLayout(digits_row)
         rename_options_layout.addWidget(digits_example_label)
+        rename_options_layout.addWidget(b_key_hint)
 
         # Thumbnail slider
         self.thumb_label = QtWidgets.QLabel(f"Thumbnail Size: {DEFAULT_THUMB}px")
@@ -491,8 +498,8 @@ class ImageOrganizer(QtWidgets.QMainWindow):
 
         search_layout1 = QtWidgets.QHBoxLayout()
         search_layout1.setSpacing(3)
-        self.search_up_btn1 = QtWidgets.QPushButton("up")
-        self.search_down_btn1 = QtWidgets.QPushButton("dn")
+        self.search_up_btn1 = QtWidgets.QPushButton("↑")
+        self.search_down_btn1 = QtWidgets.QPushButton("↓")
         self.search_up_btn1.setFixedSize(26, 26)
         self.search_down_btn1.setFixedSize(26, 26)
         self.search_up_btn1.clicked.connect(lambda: self.search_image(1, prev=True))
@@ -512,8 +519,8 @@ class ImageOrganizer(QtWidgets.QMainWindow):
 
         search_layout2 = QtWidgets.QHBoxLayout()
         search_layout2.setSpacing(3)
-        self.search_up_btn2 = QtWidgets.QPushButton("up")
-        self.search_down_btn2 = QtWidgets.QPushButton("dn")
+        self.search_up_btn2 = QtWidgets.QPushButton("↑")
+        self.search_down_btn2 = QtWidgets.QPushButton("↓")
         self.search_up_btn2.setFixedSize(26, 26)
         self.search_down_btn2.setFixedSize(26, 26)
         self.search_up_btn2.clicked.connect(lambda: self.search_image(2, prev=True))
@@ -525,7 +532,8 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         # Preview
         self.preview = QtWidgets.QLabel("Preview\n(Double LEFT-click: lock | Double RIGHT-click: unlock)")
         self.preview.setAlignment(Qt.AlignCenter)
-        self.preview.setFixedHeight(310)
+        self.preview.setFixedHeight(430)
+        self.preview.setFixedWidth(430)
         self.preview.setStyleSheet("""
             QLabel {
                 background: #1c1c1e;
@@ -603,8 +611,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         credit_label = QtWidgets.QLabel("Developed by Ivan Sicaja © 2026. All rights reserved.")
         credit_label.setAlignment(Qt.AlignCenter)
         credit_label.setStyleSheet(
-            "font-size: 9px; color: #636366; padding: 6px 0; "
-            "border-top: 1px solid #2a2a2a; background: #1c1c1e;")
+            "font-size: 9px; color: #636366; padding: 6px 0; background: #1c1c1e;")
 
         # Left panel
         left_panel_widget = QtWidgets.QWidget()
