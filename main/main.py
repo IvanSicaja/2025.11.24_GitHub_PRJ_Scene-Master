@@ -449,9 +449,9 @@ class ImageOrganizer(QtWidgets.QMainWindow):
 
         rename_options_layout.addWidget(base_name_label)
         rename_options_layout.addWidget(self.rename_base_input)
+        rename_options_layout.addWidget(b_key_hint)
         rename_options_layout.addLayout(digits_row)
         rename_options_layout.addWidget(digits_example_label)
-        rename_options_layout.addWidget(b_key_hint)
 
         # Thumbnail slider
         self.thumb_label = QtWidgets.QLabel(f"Thumbnail Size: {DEFAULT_THUMB}px")
@@ -1036,7 +1036,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             match = pattern_any.match(name)
             if match:
                 max_counter = max(max_counter, int(match.group(1)))
-        counter = max_counter + 1
+        counter = 1
         used_names = {self.list.item(i).text() for i in range(self.list.count())}
         new_items = []
         for item in renamed_items:
