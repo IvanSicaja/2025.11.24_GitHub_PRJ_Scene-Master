@@ -888,14 +888,17 @@ class ImageOrganizer(QtWidgets.QMainWindow):
     def check_for_new_files(self):
         if not self.folder or not os.path.isdir(self.folder):
             return
-        current_files = [f for f in os.listdir(self.folder) if os.path.splitext(f)[1].lower() in SUPPORTED_EXT]
-        current_set = set(current_files)
-        if current_set == self.current_folder_files:
+        current_files = [f for f in os.listdir(self.folder)
+                         if os.path.splitext(f)[1].lower() in SUPPORTED_EXT]
+        current_count = len(current_files)
+        known_count = len(self.current_folder_files)
+        if current_count == known_count:
             self.update_status_label(in_sync=True)
         else:
-            added = current_set - self.current_folder_files
-            removed = self.current_folder_files - current_set
-            self.update_status_label(in_sync=False, added_count=len(added), removed_count=len(removed))
+            diff = current_count - known_count
+            self.update_status_label(in_sync=False,
+                                     added_count=max(0, diff),
+                                     removed_count=max(0, -diff))
 
     def update_status_label(self, in_sync=True, added_count=0, removed_count=0):
         if not self.folder:
@@ -905,18 +908,18 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                 "border-radius: 5px; border: 1px solid #3a3a3c;")
             return
         if in_sync:
-            self.status_label.setText("All images in folder are loaded")
+            self.status_label.setText("✓  All images loaded")
             self.status_label.setStyleSheet(
                 "font-size: 10px; padding: 2px 6px; color: #30d158; font-weight: 600; "
                 "background: #1c1c1e; border-radius: 5px; border: 1px solid #30d158;")
         else:
-            parts = []
-            if added_count > 0:
-                parts.append(f"{added_count} added")
-            if removed_count > 0:
-                parts.append(f"{removed_count} removed")
-            msg = " | ".join(parts) if parts else "Changes detected"
-            self.status_label.setText(f"! {msg} - Reload recommended")
+            if added_count > 0 and removed_count == 0:
+                msg = f"＋{added_count} new image{'s' if added_count > 1 else ''} — Reload folder"
+            elif removed_count > 0 and added_count == 0:
+                msg = f"−{removed_count} image{'s' if removed_count > 1 else ''} removed — Reload folder"
+            else:
+                msg = f"＋{added_count} / −{removed_count} images changed — Reload folder"
+            self.status_label.setText(f"⚠  {msg}")
             self.status_label.setStyleSheet(
                 "font-size: 10px; padding: 2px 6px; color: #ff9f0a; font-weight: 600; "
                 "background: #1c1c1e; border-radius: 5px; border: 1px solid #ff9f0a;")
@@ -1111,6 +1114,10 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             except:
                 continue
         QtWidgets.QMessageBox.information(self, "Done", f"Renamed {renamed} images!")
+        # Sync the known file set so the watcher doesn't misfire
+        self.current_folder_files = set(
+            f for f in os.listdir(self.folder) if os.path.splitext(f)[1].lower() in SUPPORTED_EXT
+        )
 
     def rename_selected(self):
         sel = self.list.selectedItems()
@@ -1203,6 +1210,10 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         if new_items:
             self.list.scrollToItem(new_items[0], QAbstractItemView.PositionAtCenter)
         QtWidgets.QMessageBox.information(self, "Success", f"Renamed and placed {len(new_items)} images perfectly!")
+        # Sync the known file set so the watcher doesn't misfire
+        self.current_folder_files = set(
+            f for f in os.listdir(self.folder) if os.path.splitext(f)[1].lower() in SUPPORTED_EXT
+        )
 
     def renumber_by_base(self):
         """Find all images matching the current base name and re-number them
@@ -1276,6 +1287,10 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         QtWidgets.QMessageBox.information(
             self, "Done",
             f"Re-enumerated {renamed} images with base name '{base}'."
+        )
+        # Sync the known file set so the watcher doesn't misfire
+        self.current_folder_files = set(
+            f for f in os.listdir(self.folder) if os.path.splitext(f)[1].lower() in SUPPORTED_EXT
         )
 
     def search_image(self, search_bar, prev=False):
