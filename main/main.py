@@ -261,7 +261,7 @@ PROGRESS_ACTIVE_STYLE = """
 class ImageOrganizer(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Scenify — Image Scene Flow Organizer  ·  Developed by Ivan Sicaja © 2026")
+        self.setWindowTitle("Scenify — Image Scene Flow Organizer  |  Developed by Ivan Sicaja © 2026. All rights reserved.")
         self.apply_dark_theme()
         self.settings = QSettings("ImageSceneFlowOrganizer", "Settings")
         geometry = self.settings.value("geometry")
