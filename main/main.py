@@ -496,10 +496,22 @@ class ImageOrganizer(QtWidgets.QMainWindow):
 
         self.thumb_spinbox.setFixedSize(72, 24)   # wide enough for "400 px"
 
+        thumb_up_btn = QtWidgets.QPushButton("↑")
+        thumb_up_btn.setFixedSize(26, 26)
+        thumb_up_btn.setStyleSheet(arrow_btn_style)
+        thumb_up_btn.clicked.connect(lambda: self.thumb_spinbox.setValue(self.thumb_spinbox.value() + 1))
+
+        thumb_down_btn = QtWidgets.QPushButton("↓")
+        thumb_down_btn.setFixedSize(26, 26)
+        thumb_down_btn.setStyleSheet(arrow_btn_style)
+        thumb_down_btn.clicked.connect(lambda: self.thumb_spinbox.setValue(self.thumb_spinbox.value() - 1))
+
         thumb_label_row = QtWidgets.QHBoxLayout()
-        thumb_label_row.setSpacing(6)
+        thumb_label_row.setSpacing(4)
         thumb_label_row.addWidget(self.thumb_label)
         thumb_label_row.addWidget(self.thumb_spinbox)
+        thumb_label_row.addWidget(thumb_down_btn)
+        thumb_label_row.addWidget(thumb_up_btn)
         thumb_label_row.addStretch()
 
         self.thumb_slider = QtWidgets.QSlider(Qt.Horizontal)
