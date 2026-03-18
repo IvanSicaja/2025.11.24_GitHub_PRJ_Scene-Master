@@ -472,6 +472,29 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         rename_options_layout.addLayout(digits_row)
         rename_options_layout.addWidget(digits_example_label)
 
+        renumber_btn = QtWidgets.QPushButton("Re-enumerate by Base Name")
+        renumber_btn.setToolTip(
+            "Finds all images whose name starts with the Base Name entered above,\n"
+            "then re-numbers them 01, 02, 03 … in their current visual order."
+        )
+        renumber_btn.setStyleSheet("""
+            QPushButton {
+                padding: 4px 10px;
+                font-weight: 600;
+                font-size: 11px;
+                border-radius: 5px;
+                margin: 2px 0 0 0;
+                background: #2a4a2a;
+                color: #30d158;
+                border: 1px solid #30d158;
+            }
+            QPushButton:hover { background: #1e6e3e; color: #ffffff; }
+            QPushButton:pressed { background: #155230; }
+        """)
+        renumber_btn.setFixedHeight(26)
+        renumber_btn.clicked.connect(self.renumber_by_base)
+        rename_options_layout.addWidget(renumber_btn)
+
         # Thumbnail size — label + linked spinbox + slider
         self.thumb_label = QtWidgets.QLabel("Thumbnail Size:")
         self.thumb_label.setStyleSheet("font-size: 11px; color: #e0e0e0; font-weight: 500;")
@@ -1180,6 +1203,80 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         if new_items:
             self.list.scrollToItem(new_items[0], QAbstractItemView.PositionAtCenter)
         QtWidgets.QMessageBox.information(self, "Success", f"Renamed and placed {len(new_items)} images perfectly!")
+
+    def renumber_by_base(self):
+        """Find all images matching the current base name and re-number them
+        01, 02, 03 … in their current visual (list) order."""
+        base = self.rename_base_input.text().strip()
+        if not base:
+            QtWidgets.QMessageBox.warning(
+                self, "No Base Name",
+                "Please enter a base name first."
+            )
+            self.rename_base_input.setFocus()
+            return
+        if not self.folder:
+            QtWidgets.QMessageBox.warning(self, "No Folder", "No folder is open.")
+            return
+
+        digits = self.digits_spinbox.value()
+        pattern_any = re.compile(
+            rf"^{re.escape(base)}_(\d+)\.[a-zA-Z]{{3,4}}$", re.IGNORECASE
+        )
+
+        # Collect matching items in their current visual order
+        matching = []
+        for i in range(self.list.count()):
+            item = self.list.item(i)
+            if pattern_any.match(item.text()):
+                matching.append(item)
+
+        if not matching:
+            QtWidgets.QMessageBox.information(
+                self, "Nothing Found",
+                f"No images with base name '{base}' were found in the list."
+            )
+            return
+
+        # Two-pass rename to avoid collisions:
+        # Pass 1 — rename to unique temp names
+        temp_entries = []
+        for i, item in enumerate(matching):
+            old_path = item.data(Qt.UserRole)
+            if not os.path.exists(old_path):
+                continue
+            ext = os.path.splitext(old_path)[1]
+            tmp_path = os.path.join(self.folder, f"__RENUM_{i}{ext}")
+            try:
+                os.rename(old_path, tmp_path)
+                if old_path in self.list.thumbnail_cache:
+                    self.list.thumbnail_cache[tmp_path] = self.list.thumbnail_cache.pop(old_path)
+                item.setData(Qt.UserRole, tmp_path)
+                temp_entries.append((item, tmp_path, ext))
+            except Exception:
+                continue
+
+        # Pass 2 — rename from temp to final sequential names
+        renamed = 0
+        for seq, (item, tmp_path, ext) in enumerate(temp_entries, start=1):
+            if not os.path.exists(tmp_path):
+                continue
+            new_name = f"{base}_{str(seq).zfill(digits)}{ext}"
+            new_path = os.path.join(self.folder, new_name)
+            try:
+                os.rename(tmp_path, new_path)
+                item.setText(new_name)
+                item.setData(Qt.UserRole, new_path)
+                if tmp_path in self.list.thumbnail_cache:
+                    self.list.thumbnail_cache[new_path] = self.list.thumbnail_cache.pop(tmp_path)
+                renamed += 1
+            except Exception:
+                continue
+
+        QtWidgets.QMessageBox.information(
+            self, "Done",
+            f"Re-enumerated {renamed} images with base name '{base}'."
+        )
 
     def search_image(self, search_bar, prev=False):
         text = self.search_input1.text() if search_bar == 1 else self.search_input2.text()
