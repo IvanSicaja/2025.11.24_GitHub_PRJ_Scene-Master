@@ -774,6 +774,19 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.progress_bar.setValue(0)
         self.progress_bar.setStyleSheet(PROGRESS_IDLE_STYLE)
 
+    def _pause_watcher(self):
+        """Stop the folder watcher before any rename to prevent false-positive popups."""
+        self.folder_watch_timer.stop()
+
+    def _resume_watcher(self):
+        """Sync known files then restart the watcher after a rename is complete."""
+        if self.folder:
+            self.current_folder_files = set(
+                f for f in os.listdir(self.folder)
+                if os.path.splitext(f)[1].lower() in SUPPORTED_EXT
+            )
+        self.folder_watch_timer.start(5000)
+
     def apply_dark_theme(self):
         palette = QtGui.QPalette()
         palette.setColor(QtGui.QPalette.Window, QtGui.QColor(28, 28, 30))
@@ -1144,6 +1157,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                                           f"Rename all {self.list.count()} images to 1, 2, 3, etc.?",
                                           QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No) != QtWidgets.QMessageBox.Yes:
             return
+        self._pause_watcher()
         temp_paths = []
         for i in range(self.list.count()):
             item = self.list.item(i)
@@ -1170,10 +1184,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             except:
                 continue
         QtWidgets.QMessageBox.information(self, "Done", f"Renamed {renamed} images!")
-        # Sync the known file set so the watcher doesn't misfire
-        self.current_folder_files = set(
-            f for f in os.listdir(self.folder) if os.path.splitext(f)[1].lower() in SUPPORTED_EXT
-        )
+        self._resume_watcher()
 
     def rename_selected(self):
         sel = self.list.selectedItems()
@@ -1188,6 +1199,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             )
             self.rename_base_input.setFocus()
             return
+        self._pause_watcher()
         digits = self.digits_spinbox.value()
         renamed_items = sorted(sel, key=lambda x: self.list.row(x))
         max_counter = 0
@@ -1266,10 +1278,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         if new_items:
             self.list.scrollToItem(new_items[0], QAbstractItemView.PositionAtCenter)
         QtWidgets.QMessageBox.information(self, "Success", f"Renamed and placed {len(new_items)} images perfectly!")
-        # Sync the known file set so the watcher doesn't misfire
-        self.current_folder_files = set(
-            f for f in os.listdir(self.folder) if os.path.splitext(f)[1].lower() in SUPPORTED_EXT
-        )
+        self._resume_watcher()
 
     def renumber_by_base(self):
         """Find all images matching the current base name and re-number them
@@ -1286,6 +1295,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, "No Folder", "No folder is open.")
             return
 
+        self._pause_watcher()
         digits = self.digits_spinbox.value()
         pattern_any = re.compile(
             rf"^{re.escape(base)}_(\d+)\.[a-zA-Z]{{3,4}}$", re.IGNORECASE
@@ -1344,10 +1354,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             self, "Done",
             f"Re-enumerated {renamed} images with base name '{base}'."
         )
-        # Sync the known file set so the watcher doesn't misfire
-        self.current_folder_files = set(
-            f for f in os.listdir(self.folder) if os.path.splitext(f)[1].lower() in SUPPORTED_EXT
-        )
+        self._resume_watcher()
 
     def search_image(self, search_bar, prev=False):
         text = self.search_input1.text() if search_bar == 1 else self.search_input2.text()
