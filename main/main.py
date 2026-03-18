@@ -291,7 +291,7 @@ PROGRESS_ACTIVE_STYLE = """
 class ImageOrganizer(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Scenify — Image Scene Flow Organizer  ·  Developed by Ivan Sicaja © 2026")
+        self.setWindowTitle("Scenify — Image Scene Flow Organizer  |  Developed by Ivan Sicaja © 2026. All rights reserved.")
         self.apply_dark_theme()
         self.settings = QSettings("ImageSceneFlowOrganizer", "Settings")
         geometry = self.settings.value("geometry")
@@ -1308,6 +1308,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             except Exception:
                 continue
         if not new_items:
+            self._resume_watcher()
             return
         rows = sorted([self.list.row(itm) for itm in new_items], reverse=True)
         for r in rows:
@@ -1391,6 +1392,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
 
         # Pass 2 — rename from temp to final sequential names
         renamed = 0
+        renamed_items_ordered = []
         for seq, (item, tmp_path, ext) in enumerate(temp_entries, start=1):
             if not os.path.exists(tmp_path):
                 continue
@@ -1403,8 +1405,23 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                 if tmp_path in self.list.thumbnail_cache:
                     self.list.thumbnail_cache[new_path] = self.list.thumbnail_cache.pop(tmp_path)
                 renamed += 1
+                renamed_items_ordered.append(item)
             except Exception:
                 continue
+
+        # Reorder list widget: move all renamed items to be consecutive,
+        # starting at the position of the first one in the original order.
+        if renamed_items_ordered:
+            first_row = min(self.list.row(it) for it in renamed_items_ordered)
+            # Remove from current positions (high to low to preserve indices)
+            rows = sorted([self.list.row(it) for it in renamed_items_ordered], reverse=True)
+            for r in rows:
+                self.list.takeItem(r)
+            # Reinsert consecutively from first_row
+            for i, it in enumerate(renamed_items_ordered):
+                self.list.insertItem(first_row + i, it)
+                it.setSelected(True)
+            self.list.scrollToItem(renamed_items_ordered[0], QAbstractItemView.PositionAtCenter)
 
         QtWidgets.QMessageBox.information(
             self, "Done",
