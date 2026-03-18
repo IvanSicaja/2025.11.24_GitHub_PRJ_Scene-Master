@@ -63,7 +63,8 @@ class SmartLineEdit(QtWidgets.QLineEdit):
 class DragDropListWidget(QtWidgets.QListWidget):
     double_left_clicked = QtCore.pyqtSignal(str, str)
     double_right_clicked = QtCore.pyqtSignal(str)
-    b_key_pressed = QtCore.pyqtSignal(str)   # emits name-without-extension
+    b_key_pressed = QtCore.pyqtSignal(str)        # emits name-without-extension
+    preview_path_changed = QtCore.pyqtSignal(str) # emits file path while rubber-band selecting
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -83,6 +84,8 @@ class DragDropListWidget(QtWidgets.QListWidget):
         self.thumbnail_cache = {}
         self.itemDoubleClicked.connect(self.handle_double_click)
         self.setFocusPolicy(Qt.StrongFocus)
+        self._rubber_banding = False
+        self._last_preview_path = None
 
         self.resize_timer = QTimer()
         self.resize_timer.setSingleShot(True)
@@ -90,6 +93,33 @@ class DragDropListWidget(QtWidgets.QListWidget):
         self.progressive_timer = QTimer()
         self.progressive_timer.timeout.connect(self.resize_next_thumbnail)
         self.resize_index = 0
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._rubber_banding = True
+            self._last_preview_path = None
+            item = self.itemAt(event.pos())
+            if item:
+                path = item.data(Qt.UserRole)
+                if path:
+                    self._last_preview_path = path
+                    self.preview_path_changed.emit(path)
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._rubber_banding = False
+        super().mouseReleaseEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._rubber_banding and (event.buttons() & Qt.LeftButton):
+            item = self.itemAt(event.pos())
+            if item:
+                path = item.data(Qt.UserRole)
+                if path and path != self._last_preview_path:
+                    self._last_preview_path = path
+                    self.preview_path_changed.emit(path)
+        super().mouseMoveEvent(event)
 
     def keyPressEvent(self, event):
         # B key: copy selected image name (no ext) to base name field
@@ -710,9 +740,11 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         # Image list (right side)
         self.list = DragDropListWidget()
         self.list.itemSelectionChanged.connect(self.update_preview)
+        self.list.currentItemChanged.connect(self.update_preview_from_current)
         self.list.double_left_clicked.connect(self.handle_double_left_click)
         self.list.double_right_clicked.connect(self.handle_double_right_click)
         self.list.b_key_pressed.connect(self.handle_b_key)
+        self.list.preview_path_changed.connect(self.update_preview_from_path)
 
         # Main layout
         main_layout = QtWidgets.QHBoxLayout(central)
@@ -1118,6 +1150,30 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             return
         path = sel[0].data(Qt.UserRole)
         if os.path.exists(path):
+            pix = QtGui.QPixmap(path)
+            if not pix.isNull():
+                scaled = pix.scaled(self.preview.size() - QtCore.QSize(20, 20),
+                                    Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                self.preview.setPixmap(scaled)
+
+    def update_preview_from_current(self, current, previous):
+        """Fires on currentItemChanged — catches arrow-key and some mouse navigation."""
+        if self.preview_locked or current is None:
+            return
+        path = current.data(Qt.UserRole)
+        if path and os.path.exists(path):
+            pix = QtGui.QPixmap(path)
+            if not pix.isNull():
+                scaled = pix.scaled(self.preview.size() - QtCore.QSize(20, 20),
+                                    Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                self.preview.setPixmap(scaled)
+
+    def update_preview_from_path(self, path):
+        """Called directly from mouseMoveEvent via preview_path_changed —
+        works for rubber-band selection in every direction."""
+        if self.preview_locked:
+            return
+        if path and os.path.exists(path):
             pix = QtGui.QPixmap(path)
             if not pix.isNull():
                 scaled = pix.scaled(self.preview.size() - QtCore.QSize(20, 20),
