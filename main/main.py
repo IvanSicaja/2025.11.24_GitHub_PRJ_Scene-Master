@@ -1116,12 +1116,23 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             match = pattern_any.match(name)
             if match:
                 max_counter = max(max_counter, int(match.group(1)))
-        counter = 1
         # Exclude the selected items' own current names from used_names.
         # They are about to be renamed, so they must not block counter=1.
         selected_texts = {item.text() for item in renamed_items}
         used_names = {self.list.item(i).text() for i in range(self.list.count())
                       if self.list.item(i).text() not in selected_texts}
+        # Recalculate max_counter using only NON-selected items, so that when
+        # the selected images already carry this base name their own numbers
+        # are not counted — they are about to be replaced.
+        max_counter_excl = 0
+        for name in used_names:
+            match = pattern_any.match(name)
+            if match:
+                max_counter_excl = max(max_counter_excl, int(match.group(1)))
+        # Start from max+1 so renamed items always land at the end of the
+        # existing sequence.  If no other item uses this base name yet,
+        # max_counter_excl is 0 and counter starts at 1 as before.
+        counter = max_counter_excl + 1
         new_items = []
         for item in renamed_items:
             old_path = item.data(Qt.UserRole)
