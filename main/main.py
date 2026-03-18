@@ -1004,101 +1004,78 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                 "background: #1c1c1e; border-radius: 5px; border: 1px solid #ff9f0a;")
 
     def reload_folder(self):
-        if not self.folder or self.list.count() == 0:
+        if not self.folder:
             QtWidgets.QMessageBox.warning(self, "Error", "No folder loaded!")
             return
         reply = QtWidgets.QMessageBox.question(
             self, "Reload Folder",
-            "This will:\n1. Rename all current images to 1,2,3...\n2. Load any new images from the folder\n\nContinue?",
+            "This will load any new images from the folder.\n"
+            "Existing images keep their current names.\n\nContinue?",
             QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
         )
         if reply != QtWidgets.QMessageBox.Yes:
             return
+
         self._progress_start()
         QApplication.processEvents()
-        temp_paths = []
-        total_operations = self.list.count()
-        for i in range(self.list.count()):
-            item = self.list.item(i)
-            old_path = item.data(Qt.UserRole)
-            if not os.path.exists(old_path):
-                continue
-            ext = os.path.splitext(old_path)[1]
-            tmp_path = os.path.join(self.folder, f"__TMP_RENAME_{i}{ext}")
-            try:
-                os.rename(old_path, tmp_path)
-                if old_path in self.list.thumbnail_cache:
-                    self.list.thumbnail_cache[tmp_path] = self.list.thumbnail_cache.pop(old_path)
-                item.setData(Qt.UserRole, tmp_path)
-                temp_paths.append((item, tmp_path, ext))
-                progress = int(((i + 1) / (total_operations * 2)) * 100)
-                self.progress_bar.setValue(progress)
-                QApplication.processEvents()
-            except Exception:
-                continue
-        new_files = [f for f in os.listdir(self.folder) if
-                     os.path.splitext(f)[1].lower() in SUPPORTED_EXT and not f.startswith("__TMP_RENAME_")]
+
+        # Names already shown in the list widget
+        existing_names = {self.list.item(i).text() for i in range(self.list.count())}
+
+        # Files on disk that are not yet shown
+        disk_files = [f for f in os.listdir(self.folder)
+                      if os.path.splitext(f)[1].lower() in SUPPORTED_EXT]
+        new_files = [f for f in disk_files if f not in existing_names]
         new_files.sort(key=natural_key)
-        new_paths = []
+
+        # Find a safe starting counter for generic_ names
         counter = 0
+        existing_on_disk = set(os.listdir(self.folder))
+
+        new_paths = []
         for f in new_files:
-            old_new_path = os.path.join(self.folder, f)
+            old_path = os.path.join(self.folder, f)
             ext = os.path.splitext(f)[1]
             new_name = f"generic_{counter:06d}{ext}"
-            new_path = os.path.join(self.folder, new_name)
-            while os.path.exists(new_path):
+            while new_name in existing_on_disk or new_name in existing_names:
                 counter += 1
                 new_name = f"generic_{counter:06d}{ext}"
-                new_path = os.path.join(self.folder, new_name)
+            new_path = os.path.join(self.folder, new_name)
             try:
-                os.rename(old_new_path, new_path)
+                os.rename(old_path, new_path)
                 new_paths.append(new_path)
+                existing_on_disk.add(new_name)
+                existing_on_disk.discard(f)
             except Exception:
                 pass
             counter += 1
-        num_counter = 1
-        for idx, (item, tmp_path, ext) in enumerate(temp_paths):
-            if not os.path.exists(tmp_path):
-                continue
-            new_name = f"{num_counter}{ext}"
-            new_path = os.path.join(self.folder, new_name)
-            while os.path.exists(new_path):
-                num_counter += 1
-                new_name = f"{num_counter}{ext}"
-                new_path = os.path.join(self.folder, new_name)
-            try:
-                os.rename(tmp_path, new_path)
-                item.setData(Qt.UserRole, new_path)
-                item.setText(new_name)
-                if tmp_path in self.list.thumbnail_cache:
-                    self.list.thumbnail_cache[new_path] = self.list.thumbnail_cache.pop(tmp_path)
-                progress = 50 + int(((idx + 1) / total_operations) * 50)
-                self.progress_bar.setValue(progress)
-                QApplication.processEvents()
-            except Exception:
-                pass
-            num_counter += 1
-        for new_path in new_paths:
-            f = os.path.basename(new_path)
-            item = QtWidgets.QListWidgetItem(f)
+
+        total = len(new_paths)
+        for idx, new_path in enumerate(new_paths):
+            fname = os.path.basename(new_path)
+            item = QtWidgets.QListWidgetItem(fname)
             item.setData(Qt.UserRole, new_path)
             item.setIcon(self.list.get_thumbnail_icon(new_path))
             self.list.addItem(item)
-        items = []
-        for _ in range(self.list.count()):
-            items.append(self.list.takeItem(0))
-        items.sort(key=lambda it: natural_key(it.text()))
-        for it in items:
-            self.list.addItem(it)
-        self.progress_bar.setValue(100)
-        QApplication.processEvents()
+            self.progress_bar.setValue(int(((idx + 1) / max(total, 1)) * 100))
+            QApplication.processEvents()
+
         self._progress_done()
-        final_files = [f for f in os.listdir(self.folder) if os.path.splitext(f)[1].lower() in SUPPORTED_EXT]
+        final_files = [f for f in os.listdir(self.folder)
+                       if os.path.splitext(f)[1].lower() in SUPPORTED_EXT]
         self.current_folder_files = set(final_files)
         self.update_status_label(in_sync=True)
-        self.setWindowTitle(f"Scenify — Image Scene Flow Organizer  ·  Developed by Ivan Sicaja © 2026")
-        QtWidgets.QMessageBox.information(self, "Success",
-                                          f"Folder reloaded! Existing files renamed, {len(new_paths)} new files added.")
+        self.setWindowTitle("Scenify — Image Scene Flow Organizer  ·  Developed by Ivan Sicaja © 2026")
+        if new_paths:
+            QtWidgets.QMessageBox.information(
+                self, "Done",
+                f"{len(new_paths)} new image{'s' if len(new_paths) > 1 else ''} added."
+            )
+        else:
+            QtWidgets.QMessageBox.information(
+                self, "Up to Date",
+                "No new images found in the folder."
+            )
 
     def update_thumb_size(self, val):
         """Called when slider moves — updates spinbox and thumbnail grid."""
