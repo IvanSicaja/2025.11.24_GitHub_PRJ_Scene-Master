@@ -261,7 +261,7 @@ PROGRESS_ACTIVE_STYLE = """
 class ImageOrganizer(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Scenify — Image Scene Flow Organizer  |  Developed by Ivan Sicaja © 2026. All rights reserved.")
+        self.setWindowTitle("Scenify — Image Scene Flow Organizer  ·  Developed by Ivan Sicaja © 2026")
         self.apply_dark_theme()
         self.settings = QSettings("ImageSceneFlowOrganizer", "Settings")
         geometry = self.settings.value("geometry")
@@ -387,6 +387,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         """)
 
         digits_row = QtWidgets.QHBoxLayout()
+        digits_row.setSpacing(4)
         digits_label = QtWidgets.QLabel("Digit Count:")
         digits_label.setStyleSheet(
             "font-size: 11px; color: #a0a0a0; font-weight: 500; "
@@ -395,7 +396,9 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.digits_spinbox = QtWidgets.QSpinBox()
         self.digits_spinbox.setRange(1, 10)
         self.digits_spinbox.setValue(2)
-        self.digits_spinbox.setFixedHeight(24)
+        self.digits_spinbox.setFixedHeight(26)
+        self.digits_spinbox.setFixedWidth(52)
+        self.digits_spinbox.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
         self.digits_spinbox.setToolTip(
             "Number of digits used for the numeric suffix.\n"
             "e.g. 3 -> garage_001, garage_002\n"
@@ -412,38 +415,30 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                 font-weight: 600;
             }
             QSpinBox:focus { border: 1px solid #0066CC; }
-            QSpinBox::up-button {
-                background: #3a3a3c;
-                border: none;
-                border-top-right-radius: 5px;
-                width: 22px;
-                subcontrol-origin: border;
-                subcontrol-position: top right;
-            }
-            QSpinBox::down-button {
-                background: #3a3a3c;
-                border: none;
-                border-bottom-right-radius: 5px;
-                width: 22px;
-                subcontrol-origin: border;
-                subcontrol-position: bottom right;
-            }
-            QSpinBox::up-button:hover, QSpinBox::down-button:hover { background: #0066CC; }
-            QSpinBox::up-arrow {
-                image: none;
-                width: 0; height: 0;
-                border-left: 4px solid transparent;
-                border-right: 4px solid transparent;
-                border-bottom: 5px solid #e0e0e0;
-            }
-            QSpinBox::down-arrow {
-                image: none;
-                width: 0; height: 0;
-                border-left: 4px solid transparent;
-                border-right: 4px solid transparent;
-                border-top: 5px solid #e0e0e0;
-            }
         """)
+
+        arrow_btn_style = """
+            QPushButton {
+                background: #3a3a3c;
+                color: #e0e0e0;
+                border: none;
+                border-radius: 5px;
+                font-size: 13px;
+                font-weight: 700;
+                padding: 0px;
+            }
+            QPushButton:hover { background: #0066CC; }
+            QPushButton:pressed { background: #0051A3; }
+        """
+        digits_up_btn = QtWidgets.QPushButton("↑")
+        digits_up_btn.setFixedSize(26, 26)
+        digits_up_btn.setStyleSheet(arrow_btn_style)
+        digits_up_btn.clicked.connect(lambda: self.digits_spinbox.setValue(self.digits_spinbox.value() + 1))
+
+        digits_down_btn = QtWidgets.QPushButton("↓")
+        digits_down_btn.setFixedSize(26, 26)
+        digits_down_btn.setStyleSheet(arrow_btn_style)
+        digits_down_btn.clicked.connect(lambda: self.digits_spinbox.setValue(self.digits_spinbox.value() - 1))
         digits_example_label = QtWidgets.QLabel()
         digits_example_label.setStyleSheet(
             "font-size: 10px; color: #636366; background: transparent; border: none;"
@@ -461,6 +456,8 @@ class ImageOrganizer(QtWidgets.QMainWindow):
 
         digits_row.addWidget(digits_label)
         digits_row.addWidget(self.digits_spinbox)
+        digits_row.addWidget(digits_down_btn)
+        digits_row.addWidget(digits_up_btn)
         digits_row.addStretch()
 
         b_key_hint = QtWidgets.QLabel("Select a thumbnail and press B to load its name as Base Name.")
@@ -482,57 +479,28 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.thumb_spinbox = QtWidgets.QSpinBox()
         self.thumb_spinbox.setRange(THUMB_MIN, THUMB_MAX)
         self.thumb_spinbox.setValue(DEFAULT_THUMB)
-        self.thumb_spinbox.setFixedSize(58, 24)
         self.thumb_spinbox.setSuffix(" px")
+        self.thumb_spinbox.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
         self.thumb_spinbox.setStyleSheet("""
             QSpinBox {
                 background-color: #1c1c1e;
                 border: 1px solid #3a3a3c;
                 border-radius: 5px;
-                padding: 2px 4px;
+                padding: 2px 6px;
                 color: #e0e0e0;
                 font-size: 11px;
                 font-weight: 600;
             }
             QSpinBox:focus { border: 1px solid #0066CC; }
-            QSpinBox::up-button {
-                background: #3a3a3c;
-                border: none;
-                border-top-right-radius: 4px;
-                width: 18px;
-                subcontrol-origin: border;
-                subcontrol-position: top right;
-            }
-            QSpinBox::down-button {
-                background: #3a3a3c;
-                border: none;
-                border-bottom-right-radius: 4px;
-                width: 18px;
-                subcontrol-origin: border;
-                subcontrol-position: bottom right;
-            }
-            QSpinBox::up-button:hover, QSpinBox::down-button:hover { background: #0066CC; }
-            QSpinBox::up-arrow {
-                image: none;
-                width: 0; height: 0;
-                border-left: 3px solid transparent;
-                border-right: 3px solid transparent;
-                border-bottom: 4px solid #e0e0e0;
-            }
-            QSpinBox::down-arrow {
-                image: none;
-                width: 0; height: 0;
-                border-left: 3px solid transparent;
-                border-right: 3px solid transparent;
-                border-top: 4px solid #e0e0e0;
-            }
         """)
+
+        self.thumb_spinbox.setFixedSize(72, 24)   # wide enough for "400 px"
 
         thumb_label_row = QtWidgets.QHBoxLayout()
         thumb_label_row.setSpacing(6)
         thumb_label_row.addWidget(self.thumb_label)
-        thumb_label_row.addStretch()
         thumb_label_row.addWidget(self.thumb_spinbox)
+        thumb_label_row.addStretch()
 
         self.thumb_slider = QtWidgets.QSlider(Qt.Horizontal)
         self.thumb_slider.setRange(THUMB_MIN, THUMB_MAX)
