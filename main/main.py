@@ -330,11 +330,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         bottom_btn.setFixedHeight(26)
         bottom_btn.clicked.connect(self.move_to_bottom)
 
-        clear_btn = QtWidgets.QPushButton("Clear Selection")
-        clear_btn.setStyleSheet(gray_btn_style)
-        clear_btn.setFixedHeight(26)
-        clear_btn.clicked.connect(lambda: self.list.clearSelection())
-
         rename_all_btn = QtWidgets.QPushButton("Rename All")
         rename_all_btn.setStyleSheet(blue_btn_style)
         rename_all_btn.setFixedHeight(26)
@@ -640,7 +635,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         inner_layout.addWidget(reload_btn)
         inner_layout.addWidget(top_btn)
         inner_layout.addWidget(bottom_btn)
-        inner_layout.addWidget(clear_btn)
         inner_layout.addWidget(rename_all_btn)
         inner_layout.addWidget(rename_selected_btn)
         inner_layout.addWidget(rename_options_frame)
@@ -888,17 +882,102 @@ class ImageOrganizer(QtWidgets.QMainWindow):
     def check_for_new_files(self):
         if not self.folder or not os.path.isdir(self.folder):
             return
-        current_files = [f for f in os.listdir(self.folder)
-                         if os.path.splitext(f)[1].lower() in SUPPORTED_EXT]
-        current_count = len(current_files)
-        known_count = len(self.current_folder_files)
-        if current_count == known_count:
-            self.update_status_label(in_sync=True)
-        else:
-            diff = current_count - known_count
+        current_files = set(f for f in os.listdir(self.folder)
+                            if os.path.splitext(f)[1].lower() in SUPPORTED_EXT)
+        known_files = self.current_folder_files
+
+        removed = known_files - current_files
+        added = current_files - known_files
+
+        if removed:
+            # Remove deleted files from the list widget silently
+            rows_to_remove = []
+            for i in range(self.list.count()):
+                item = self.list.item(i)
+                if item and os.path.basename(item.data(Qt.UserRole) or "") in removed:
+                    rows_to_remove.append(i)
+            for row in reversed(rows_to_remove):
+                self.list.takeItem(row)
+
+            # Update known set to reflect reality
+            self.current_folder_files = current_files
+
+            # Show scrollable popup listing removed filenames
+            removed_sorted = sorted(removed, key=natural_key)
+            dialog = QtWidgets.QDialog(self)
+            dialog.setWindowTitle("Images Removed from Folder")
+            dialog.setMinimumWidth(420)
+            dialog.setMinimumHeight(280)
+            dialog.setStyleSheet("background: #1c1c1e; color: #e0e0e0;")
+
+            dlg_layout = QtWidgets.QVBoxLayout(dialog)
+            dlg_layout.setContentsMargins(16, 16, 16, 16)
+            dlg_layout.setSpacing(10)
+
+            header = QtWidgets.QLabel(
+                f"⚠  {len(removed_sorted)} image{'s' if len(removed_sorted) > 1 else ''} "
+                f"{'were' if len(removed_sorted) > 1 else 'was'} removed from the folder:"
+            )
+            header.setStyleSheet("font-size: 12px; font-weight: 600; color: #ff9f0a;")
+            header.setWordWrap(True)
+            dlg_layout.addWidget(header)
+
+            list_widget = QtWidgets.QListWidget()
+            list_widget.setStyleSheet("""
+                QListWidget {
+                    background: #2c2c2e;
+                    border: 1px solid #3a3a3c;
+                    border-radius: 6px;
+                    color: #e0e0e0;
+                    font-size: 11px;
+                    padding: 4px;
+                }
+                QListWidget::item { padding: 3px 6px; }
+                QScrollBar:vertical {
+                    background: #2c2c2e; width: 8px; border-radius: 4px;
+                }
+                QScrollBar::handle:vertical {
+                    background: #3a3a3c; border-radius: 4px; min-height: 20px;
+                }
+                QScrollBar::handle:vertical:hover { background: #0066CC; }
+                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+            """)
+            for name in removed_sorted:
+                list_widget.addItem(name)
+            dlg_layout.addWidget(list_widget)
+
+            ok_btn = QtWidgets.QPushButton("OK")
+            ok_btn.setFixedHeight(28)
+            ok_btn.setStyleSheet("""
+                QPushButton {
+                    background: #0066CC; color: white; border: none;
+                    border-radius: 5px; font-weight: 600; font-size: 11px;
+                    padding: 4px 20px;
+                }
+                QPushButton:hover { background: #007AFF; }
+                QPushButton:pressed { background: #0051A3; }
+            """)
+            ok_btn.clicked.connect(dialog.accept)
+            btn_row = QtWidgets.QHBoxLayout()
+            btn_row.addStretch()
+            btn_row.addWidget(ok_btn)
+            dlg_layout.addLayout(btn_row)
+
+            dialog.exec_()
+
+            # Re-check status after cleanup
+            if added:
+                diff = len(added)
+                self.update_status_label(in_sync=False, added_count=diff, removed_count=0)
+            else:
+                self.update_status_label(in_sync=True)
+
+        elif added:
             self.update_status_label(in_sync=False,
-                                     added_count=max(0, diff),
-                                     removed_count=max(0, -diff))
+                                     added_count=len(added),
+                                     removed_count=0)
+        else:
+            self.update_status_label(in_sync=True)
 
     def update_status_label(self, in_sync=True, added_count=0, removed_count=0):
         if not self.folder:
