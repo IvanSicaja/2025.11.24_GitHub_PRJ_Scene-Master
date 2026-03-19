@@ -292,6 +292,13 @@ class ImageOrganizer(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Scenify — Image Scene Flow Organizer  |  Developed by Ivan Sicaja © 2026. All rights reserved.")
+        # Load app icon — update this path to match your icon location
+        _icon_path = r"..\assets\media\icons\icon.ico"
+        if not os.path.exists(_icon_path):
+            # Fallback: try .png next to the .ico
+            _icon_path = _icon_path.replace("icon.ico", "icon.png")
+        if os.path.exists(_icon_path):
+            self.setWindowIcon(QtGui.QIcon(_icon_path))
         self.apply_dark_theme()
         self.settings = QSettings("ImageSceneFlowOrganizer", "Settings")
         geometry = self.settings.value("geometry")
