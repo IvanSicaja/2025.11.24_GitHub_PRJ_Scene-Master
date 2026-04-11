@@ -26,6 +26,12 @@ UPDATED:
 - FIXED: Progress bar always reserves its space (pinned above copyright), never shifts layout
 - FIXED: Reduced button height + compact status label — no scrolling on left panel
 - NEW: Press B/b with an image selected to copy its name (no ext) into the Base Name field
+
+BUGFIX (reload_folder):
+- Counter for generic_ names now scans existing disk files so it never reuses a
+  number that was previously assigned (even if that file was later renamed).
+- Thumbnail cache is evicted for both old_path and new_path before the rename
+  so the new image's actual thumbnail is always displayed, not a stale one.
 """
 import os
 import sys
@@ -1080,9 +1086,21 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         new_files = [f for f in disk_files if f not in existing_names]
         new_files.sort(key=natural_key)
 
-        # Find a safe starting counter for generic_ names
-        counter = 0
+        # ── FIX 1 ─────────────────────────────────────────────────────────────
+        # Scan ALL files currently on disk to find the highest generic_XXXXXX
+        # number already used, then start the counter one above that.
+        # This prevents reusing a number whose file was renamed away in a
+        # previous session, which caused the second batch of new images to
+        # receive the same generic name (and therefore the same cached thumbnail)
+        # as the first batch.
         existing_on_disk = set(os.listdir(self.folder))
+        counter = 0
+        _generic_re = re.compile(r"^generic_(\d+)\.", re.IGNORECASE)
+        for _fn in existing_on_disk:
+            _m = _generic_re.match(_fn)
+            if _m:
+                counter = max(counter, int(_m.group(1)) + 1)
+        # ── END FIX 1 ─────────────────────────────────────────────────────────
 
         new_paths = []
         for f in new_files:
@@ -1095,6 +1113,14 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             new_path = os.path.join(self.folder, new_name)
             try:
                 os.rename(old_path, new_path)
+                # ── FIX 2 ─────────────────────────────────────────────────────
+                # Evict any stale cache entries for both the old and new paths
+                # so get_thumbnail_icon always reads the actual new image from
+                # disk instead of returning a pixmap cached from a previous file
+                # that happened to share the same path string.
+                self.list.thumbnail_cache.pop(old_path, None)
+                self.list.thumbnail_cache.pop(new_path, None)
+                # ── END FIX 2 ─────────────────────────────────────────────────
                 new_paths.append(new_path)
                 existing_on_disk.add(new_name)
                 existing_on_disk.discard(f)
