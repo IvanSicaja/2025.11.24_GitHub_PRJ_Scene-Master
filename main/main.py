@@ -491,6 +491,285 @@ def set_image_rating(path: str, rating: int) -> bool:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+#  Scene-tag helpers
+#
+#  The tag is stored as a plain UTF-8 string in:
+#    JPEG  — EXIF ImageDescription (tag 0x010E, ASCII) via piexif
+#            + XMP dc:description for cross-app visibility
+#    PNG   — XMP iTXt chunk, dc:description
+#
+#  Windows Explorer shows ImageDescription in the "Title" / "Comments" column.
+#  The tag is also visible in the Details pane (File → Properties → Details).
+# ──────────────────────────────────────────────────────────────────────────────
+
+_DC_DESC_RE = re.compile(
+    r'<dc:description>\s*<rdf:Alt[^>]*>\s*<rdf:li[^>]*>(.*?)</rdf:li>',
+    re.IGNORECASE | re.DOTALL
+)
+# Simpler fallback: plain dc:description text node
+_DC_DESC_PLAIN_RE = re.compile(
+    r'<dc:description>(.*?)</dc:description>',
+    re.IGNORECASE | re.DOTALL
+)
+
+
+def _build_xmp_packet_with_tag(rating_stars: int, tag_text: str) -> bytes:
+    """
+    Build an XMP packet that carries BOTH the rating fields AND dc:description.
+    Either or both may be absent (empty string / 0).
+    """
+    pct = _STAR_TO_PERCENT.get(rating_stars, 0)
+    rating_block = (
+        f"      <xmp:Rating>{rating_stars}</xmp:Rating>\n"
+        f"      <MicrosoftPhoto:Rating>{pct}</MicrosoftPhoto:Rating>\n"
+    ) if rating_stars > 0 else ""
+
+    import xml.sax.saxutils as _sax
+    tag_block = (
+        "      <dc:description><rdf:Alt>"
+        f"<rdf:li xml:lang='x-default'>{_sax.escape(tag_text)}</rdf:li>"
+        "</rdf:Alt></dc:description>\n"
+    ) if tag_text else ""
+
+    xmp = (
+        "<?xpacket begin='\xef\xbb\xbf' id='W5M0MpCehiHzreSzNTczkc9d'?>\n"
+        "<x:xmpmeta xmlns:x='adobe:ns:meta/' x:xmptk='Scenify'>\n"
+        "  <rdf:RDF xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#'>\n"
+        "    <rdf:Description rdf:about=''\n"
+        "        xmlns:xmp='http://ns.adobe.com/xap/1.0/'\n"
+        "        xmlns:MicrosoftPhoto='http://ns.microsoft.com/photo/1.0/'\n"
+        "        xmlns:dc='http://purl.org/dc/elements/1.1/'>\n"
+        f"{rating_block}"
+        f"{tag_block}"
+        "    </rdf:Description>\n"
+        "  </rdf:RDF>\n"
+        "</x:xmpmeta>\n"
+        "<?xpacket end='w'?>"
+    )
+    return xmp.encode('utf-8')
+
+
+def _xmp_extract_tag(xmp_str: str) -> str:
+    """Extract dc:description text from an XMP string."""
+    m = _DC_DESC_RE.search(xmp_str)
+    if m:
+        return m.group(1).strip()
+    m2 = _DC_DESC_PLAIN_RE.search(xmp_str)
+    if m2:
+        return m2.group(1).strip()
+    return ""
+
+
+def _xmp_extract_rating(xmp_str: str) -> int:
+    """Extract xmp:Rating from XMP string (fallback path)."""
+    m = _XMP_RATING_RE.search(xmp_str)
+    if m:
+        return int(m.group(1))
+    m2 = _MS_RATING_RE.search(xmp_str)
+    if m2:
+        pct = int(m2.group(1))
+        for stars, p in _STAR_TO_PERCENT.items():
+            if p == pct and stars > 0:
+                return stars
+    return 0
+
+
+# ── JPEG tag helpers ──────────────────────────────────────────────────────────
+
+def _jpeg_read_xmp_str(path: str) -> str:
+    """Return the raw XMP string from a JPEG, or '' if absent."""
+    try:
+        with open(path, 'rb') as f:
+            data = f.read()
+        if data[:2] != b'\xff\xd8':
+            return ''
+        i = 2
+        while i < len(data) - 4:
+            if data[i] != 0xff:
+                break
+            marker = data[i:i+2]
+            if marker in (b'\xff\xda', b'\xff\xd9'):
+                break
+            sl  = struct.unpack('>H', data[i+2:i+4])[0]
+            sp  = data[i+4:i+2+sl]
+            if marker == b'\xff\xe1' and sp.startswith(_JPEG_XMP_MARKER):
+                return sp[len(_JPEG_XMP_MARKER):].decode('utf-8', errors='ignore')
+            i += 2 + sl
+    except Exception:
+        pass
+    return ''
+
+
+def get_image_tag(path: str) -> str:
+    """
+    Return the scene-tag string stored in the image, or '' if none.
+    JPEG: reads EXIF ImageDescription (tag 0x010E) first, falls back to XMP dc:description.
+    PNG:  reads XMP iTXt dc:description.
+    """
+    ext = os.path.splitext(path)[1].lower()
+    if ext in ('.jpg', '.jpeg'):
+        # 1. EXIF ImageDescription
+        if _PIEXIF_AVAILABLE:
+            try:
+                ed  = _piexif.load(path)
+                val = ed.get('0th', {}).get(_piexif.ImageIFD.ImageDescription, b'')
+                if val:
+                    text = val.decode('utf-8', errors='ignore').rstrip('\x00').strip()
+                    if text:
+                        return text
+            except Exception:
+                pass
+        # 2. XMP dc:description
+        xmp = _jpeg_read_xmp_str(path)
+        if xmp:
+            return _xmp_extract_tag(xmp)
+        return ''
+
+    if ext == '.png':
+        try:
+            with open(path, 'rb') as f:
+                data = f.read()
+            if data[:8] != _PNG_SIG:
+                return ''
+            i = 8
+            while i < len(data) - 12:
+                length     = struct.unpack('>I', data[i:i+4])[0]
+                ctype      = data[i+4:i+8]
+                chunk_data = data[i+8:i+8+length]
+                if ctype == b'iTXt' and chunk_data.startswith(_PNG_XMP_KEYWORD):
+                    text = chunk_data[len(_PNG_XMP_KEYWORD)+5:].decode('utf-8', errors='ignore')
+                    return _xmp_extract_tag(text)
+                i += 12 + length
+        except Exception:
+            pass
+        return ''
+    return ''
+
+
+def set_image_tag(path: str, tag_text: str) -> bool:
+    """
+    Write (or remove) a scene-tag string into the image metadata.
+    tag_text='' removes the tag.
+    Also preserves the existing rating so the XMP packet stays consistent.
+    Calls SHChangeNotify() so Windows Explorer refreshes immediately.
+    """
+    ext = os.path.splitext(path)[1].lower()
+
+    if ext in ('.jpg', '.jpeg'):
+        # ── Step 1: write EXIF ImageDescription via piexif ───────────────────
+        if _PIEXIF_AVAILABLE:
+            try:
+                try:
+                    ed = _piexif.load(path)
+                except Exception:
+                    ed = {'0th': {}, 'Exif': {}, 'GPS': {}, 'Interop': {}, '1st': {}}
+                if tag_text:
+                    ed['0th'][_piexif.ImageIFD.ImageDescription] = \
+                        tag_text.encode('utf-8') + b'\x00'
+                else:
+                    ed['0th'].pop(_piexif.ImageIFD.ImageDescription, None)
+                _piexif.insert(_piexif.dump(ed), path)
+            except Exception:
+                pass
+
+        # ── Step 2: rewrite XMP segment (preserving rating) ──────────────────
+        try:
+            # Read current rating from EXIF so we can re-embed it
+            current_rating = get_image_rating(path)
+
+            with open(path, 'rb') as f:
+                data = f.read()
+            if data[:2] != b'\xff\xd8':
+                _notify_shell(path)
+                return True
+
+            new_xmp_payload = (
+                _JPEG_XMP_MARKER
+                + _build_xmp_packet_with_tag(current_rating, tag_text)
+            )
+
+            out          = bytearray(b'\xff\xd8')
+            xmp_injected = False
+            i            = 2
+
+            while i < len(data):
+                if data[i] != 0xff:
+                    if not xmp_injected:
+                        out += (b'\xff\xe1'
+                                + struct.pack('>H', len(new_xmp_payload) + 2)
+                                + new_xmp_payload)
+                        xmp_injected = True
+                    out += data[i:]
+                    break
+                marker = data[i:i+2]
+                if marker in (b'\xff\xda', b'\xff\xd9'):
+                    if not xmp_injected:
+                        out += (b'\xff\xe1'
+                                + struct.pack('>H', len(new_xmp_payload) + 2)
+                                + new_xmp_payload)
+                        xmp_injected = True
+                    out += data[i:]
+                    break
+                sl  = struct.unpack('>H', data[i+2:i+4])[0]
+                se  = i + 2 + sl
+                sp  = data[i+4:se]
+                if marker == b'\xff\xe1' and sp.startswith(_JPEG_XMP_MARKER):
+                    if not xmp_injected:
+                        xmp_injected = True
+                        out += (b'\xff\xe1'
+                                + struct.pack('>H', len(new_xmp_payload) + 2)
+                                + new_xmp_payload)
+                    i = se
+                    continue
+                out += data[i:se]
+                i = se
+
+            with open(path, 'wb') as f:
+                f.write(bytes(out))
+        except Exception:
+            pass
+
+        _notify_shell(path)
+        return True
+
+    if ext == '.png':
+        try:
+            current_rating = get_image_rating(path)
+            with open(path, 'rb') as f:
+                data = f.read()
+            if data[:8] != _PNG_SIG:
+                return False
+            out = bytearray(_PNG_SIG)
+            i   = 8
+            injected = False
+            while i < len(data):
+                if i + 8 > len(data):
+                    out += data[i:]
+                    break
+                length     = struct.unpack('>I', data[i:i+4])[0]
+                ctype      = data[i+4:i+8]
+                chunk_data = data[i+8:i+8+length]
+                if ctype == b'iTXt' and chunk_data.startswith(_PNG_XMP_KEYWORD):
+                    i += 12 + length
+                    continue
+                if ctype == b'IDAT' and not injected:
+                    xmp_bytes = _build_xmp_packet_with_tag(current_rating, tag_text)
+                    itxt_data = _PNG_XMP_KEYWORD + b'\x00\x00\x00\x00\x00' + xmp_bytes
+                    out += _png_make_chunk(b'iTXt', itxt_data)
+                    injected = True
+                out += data[i:i+12+length]
+                i += 12 + length
+            with open(path, 'wb') as f:
+                f.write(bytes(out))
+            _notify_shell(path)
+            return True
+        except Exception:
+            return False
+
+    return False
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 
 
 def natural_key(s):
@@ -640,14 +919,216 @@ class StarOverlay(QtWidgets.QWidget):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-#  DragDropListWidget  — extended to manage StarOverlay widgets
+#  TagOverlay  — top-left corner badge; clicking opens the tag editor dialog
 # ──────────────────────────────────────────────────────────────────────────────
+
+class TagOverlay(QtWidgets.QWidget):
+    """
+    Floating 'T' badge rendered over the top-left corner of each thumbnail.
+
+    Visual states:
+      • Tagged     — solid cyan-teal badge with white T
+      • Hovered    — semi-bright badge, inviting a click
+      • No tag     — very faint, barely visible placeholder
+      • Unsupported format — greyed out, no click
+    """
+
+    tag_changed = QtCore.pyqtSignal(str)   # emits new tag text ('' = removed)
+
+    def __init__(self, parent, path: str, size: int = 22):
+        super().__init__(parent)
+        self._path      = path
+        self._supported = os.path.splitext(path)[1].lower() in XMP_SUPPORTED_EXT
+        self._tag       = ""
+        self._hovered   = False
+        self._size      = size
+        self.setFixedSize(self._size, self._size)
+        self.setCursor(Qt.PointingHandCursor if self._supported else Qt.ArrowCursor)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+        self.setAttribute(Qt.WA_NoSystemBackground, True)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setToolTip(
+            "🏷  Click to add / edit scene tag" if self._supported
+            else "Tags not supported for this file type")
+
+        if self._supported and os.path.exists(path):
+            self._tag = get_image_tag(path)
+
+    # ── public ────────────────────────────────────────────────────────────────
+
+    def get_tag(self) -> str:
+        return self._tag
+
+    def set_tag(self, text: str):
+        self._tag = text
+        self.update()
+
+    def update_path(self, path: str):
+        self._path      = path
+        self._supported = os.path.splitext(path)[1].lower() in XMP_SUPPORTED_EXT
+        self.setCursor(Qt.PointingHandCursor if self._supported else Qt.ArrowCursor)
+        if self._supported and os.path.exists(path):
+            self._tag = get_image_tag(path)
+        self.update()
+
+    # ── events ────────────────────────────────────────────────────────────────
+
+    def enterEvent(self, event):
+        self._hovered = True
+        self.update()
+
+    def leaveEvent(self, event):
+        self._hovered = False
+        self.update()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self._supported:
+            self._open_tag_dialog()
+        event.accept()
+
+    def _open_tag_dialog(self):
+        dlg = QtWidgets.QDialog(self.window())
+        dlg.setWindowTitle("Scene Tag")
+        dlg.setMinimumWidth(380)
+        dlg.setStyleSheet("""
+            QDialog   { background: #1c1c1e; color: #e0e0e0; }
+            QLabel    { color: #a0a0a0; font-size: 11px; }
+            QLineEdit {
+                background: #2c2c2e; border: 1px solid #3a3a3c;
+                border-radius: 6px; padding: 6px 10px; color: #e0e0e0;
+                font-size: 13px; selection-background-color: #0066CC;
+            }
+            QLineEdit:focus { border: 1px solid #32ade6; }
+        """)
+        layout = QtWidgets.QVBoxLayout(dlg)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(10)
+
+        # Header
+        header = QtWidgets.QLabel(
+            f"<b style='color:#32ade6;font-size:13px;'>🏷  Scene Tag</b><br>"
+            f"<span style='color:#636366;font-size:10px;'>"
+            f"{os.path.basename(self._path)}</span>")
+        header.setTextFormat(Qt.RichText)
+        layout.addWidget(header)
+
+        hint = QtWidgets.QLabel(
+            "Tag is written into the file's metadata and visible in Windows "
+            "Explorer (Details pane → Title / Comments). Leave blank to remove.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #636366; font-size: 10px;")
+        layout.addWidget(hint)
+
+        edit = QtWidgets.QLineEdit(self._tag)
+        edit.setPlaceholderText("e.g.  Garage interior  /  Night scene  /  Act 2")
+        edit.setClearButtonEnabled(True)
+        layout.addWidget(edit)
+
+        btn_row = QtWidgets.QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        cancel_btn = QtWidgets.QPushButton("Cancel")
+        cancel_btn.setFixedHeight(30)
+        cancel_btn.setStyleSheet("""
+            QPushButton {
+                background: #3a3a3c; color: #e0e0e0; border: none;
+                border-radius: 6px; font-weight: 600; font-size: 11px; padding: 4px 18px;
+            }
+            QPushButton:hover { background: #48484a; }
+        """)
+        cancel_btn.clicked.connect(dlg.reject)
+
+        clear_btn = QtWidgets.QPushButton("Remove Tag")
+        clear_btn.setFixedHeight(30)
+        clear_btn.setStyleSheet("""
+            QPushButton {
+                background: #3a1a1a; color: #ff6b6b; border: 1px solid #7a2020;
+                border-radius: 6px; font-weight: 600; font-size: 11px; padding: 4px 18px;
+            }
+            QPushButton:hover { background: #5a1a1a; color: #ff8888; }
+        """)
+        clear_btn.clicked.connect(lambda: (edit.clear(), dlg.accept()))
+
+        ok_btn = QtWidgets.QPushButton("Save Tag")
+        ok_btn.setFixedHeight(30)
+        ok_btn.setDefault(True)
+        ok_btn.setStyleSheet("""
+            QPushButton {
+                background: #1a3a5a; color: #32ade6; border: 1px solid #1a6a9a;
+                border-radius: 6px; font-weight: 700; font-size: 11px; padding: 4px 18px;
+            }
+            QPushButton:hover { background: #1a4a7a; color: #5bc8f5; }
+            QPushButton:pressed { background: #0e2a4a; }
+        """)
+        ok_btn.clicked.connect(dlg.accept)
+
+        btn_row.addWidget(cancel_btn)
+        btn_row.addStretch()
+        btn_row.addWidget(clear_btn)
+        btn_row.addWidget(ok_btn)
+        layout.addLayout(btn_row)
+
+        edit.setFocus()
+        edit.selectAll()
+
+        if dlg.exec_() == QtWidgets.QDialog.Accepted:
+            new_tag = edit.text().strip()
+            if new_tag != self._tag:
+                if set_image_tag(self._path, new_tag):
+                    self._tag = new_tag
+                    self.update()
+                    self.tag_changed.emit(new_tag)
+
+    # ── painting ──────────────────────────────────────────────────────────────
+
+    def paintEvent(self, event):
+        painter = QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+
+        s    = self._size
+        has  = bool(self._tag)
+
+        # Background pill
+        painter.setPen(Qt.NoPen)
+        if not self._supported:
+            painter.setBrush(QtGui.QColor(80, 80, 80, 60))
+        elif has:
+            if self._hovered:
+                painter.setBrush(QtGui.QColor(50, 180, 230, 230))
+            else:
+                painter.setBrush(QtGui.QColor(30, 140, 200, 210))
+        else:
+            if self._hovered:
+                painter.setBrush(QtGui.QColor(50, 180, 230, 140))
+            else:
+                painter.setBrush(QtGui.QColor(255, 255, 255, 28))
+
+        r = s * 0.30
+        painter.drawRoundedRect(QtCore.QRectF(1, 1, s - 2, s - 2), r, r)
+
+        # 'T' glyph
+        if not self._supported:
+            t_color = QtGui.QColor(140, 140, 140, 80)
+        elif has:
+            t_color = QtGui.QColor(255, 255, 255, 255)
+        else:
+            t_color = QtGui.QColor(255, 255, 255, 120) if self._hovered \
+                      else QtGui.QColor(255, 255, 255, 60)
+
+        font = QtGui.QFont("Arial", max(7, int(s * 0.52)), QtGui.QFont.Bold)
+        painter.setFont(font)
+        painter.setPen(t_color)
+        painter.drawText(QtCore.QRectF(0, 0, s, s + 1), Qt.AlignCenter, "T")
+        painter.end()
+
+
 
 class DragDropListWidget(QtWidgets.QListWidget):
     double_left_clicked  = QtCore.pyqtSignal(str, str)
     double_right_clicked = QtCore.pyqtSignal(str)
     b_key_pressed        = QtCore.pyqtSignal(str)
     preview_path_changed = QtCore.pyqtSignal(str)
+    scene_tag_changed    = QtCore.pyqtSignal()   # emitted when any tag is set/cleared
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -671,8 +1152,9 @@ class DragDropListWidget(QtWidgets.QListWidget):
         self._rubber_banding    = False
         self._last_preview_path = None
 
-        # star overlays: row → StarOverlay
+        # overlay dicts: row → overlay widget
         self._star_overlays: dict[int, StarOverlay] = {}
+        self._tag_overlays:  dict[int, TagOverlay]  = {}
 
         self.resize_timer = QTimer()
         self.resize_timer.setSingleShot(True)
@@ -681,18 +1163,33 @@ class DragDropListWidget(QtWidgets.QListWidget):
         self.progressive_timer.timeout.connect(self.resize_next_thumbnail)
         self.resize_index = 0
 
-        # Reposition stars whenever scroll or layout changes
-        self.verticalScrollBar().valueChanged.connect(self._reposition_stars)
-        self.horizontalScrollBar().valueChanged.connect(self._reposition_stars)
+        # Reposition overlays whenever scroll or layout changes
+        self.verticalScrollBar().valueChanged.connect(self._reposition_overlays)
+        self.horizontalScrollBar().valueChanged.connect(self._reposition_overlays)
+
+    # ── overlay size helpers ──────────────────────────────────────────────────
+
+    def _star_size_for_thumb(self) -> int:
+        return max(16, min(28, int(self.thumbnail_size * 0.16)))
+
+    def _tag_size_for_thumb(self) -> int:
+        return max(16, min(28, int(self.thumbnail_size * 0.16)))
+
+    # ── combined reposition ───────────────────────────────────────────────────
+
+    def _reposition_overlays(self):
+        for row in list(self._star_overlays.keys()):
+            self._position_star(row)
+        for row in list(self._tag_overlays.keys()):
+            self._position_tag(row)
+
+    # alias kept for existing call sites
+    def _reposition_stars(self):
+        self._reposition_overlays()
 
     # ── star management ───────────────────────────────────────────────────────
 
-    def _star_size_for_thumb(self) -> int:
-        """Scale star size proportionally to current thumbnail size."""
-        return max(16, min(28, int(self.thumbnail_size * 0.16)))
-
     def add_star_for_item(self, row: int):
-        """Create and position a StarOverlay for the item at *row*."""
         item = self.item(row)
         if item is None:
             return
@@ -704,38 +1201,37 @@ class DragDropListWidget(QtWidgets.QListWidget):
         self._position_star(row)
 
     def _position_star(self, row: int):
-        """Move the StarOverlay for *row* to the correct viewport position."""
         star = self._star_overlays.get(row)
         if star is None:
             return
         item = self.item(row)
         if item is None:
             return
-        rect = self.visualItemRect(item)
-        sz   = star.width()
+        rect   = self.visualItemRect(item)
+        sz     = star.width()
         margin = 4
-        x = rect.right()  - sz - margin
-        y = rect.top()    + margin
-        star.move(x, y)
+        star.move(rect.right() - sz - margin, rect.top() + margin)
         star.raise_()
 
-    def _reposition_stars(self):
-        """Reposition all visible stars (called after scroll/resize)."""
-        for row in list(self._star_overlays.keys()):
-            self._position_star(row)
-
     def _rebuild_star_index(self):
-        """
-        After any insert/remove the row→star mapping must be rebuilt because
-        rows shift.  We rely on each StarOverlay's stored path to re-identify
-        its item.
-        """
-        # Build path→star map
-        path_to_star = {}
-        for star in self._star_overlays.values():
-            path_to_star[star._path] = star
-
+        path_to_star = {s._path: s for s in self._star_overlays.values()}
         self._star_overlays.clear()
+
+        # Build a set of paths currently in the list
+        current_paths = set()
+        for i in range(self.count()):
+            item = self.item(i)
+            if item is not None:
+                current_paths.add(item.data(Qt.UserRole) or "")
+
+        # Destroy any overlay whose file is no longer in the list
+        for path, star in list(path_to_star.items()):
+            if path not in current_paths:
+                star.hide()
+                star.deleteLater()
+                del path_to_star[path]
+
+        # Re-map surviving overlays to their new row numbers
         for i in range(self.count()):
             item = self.item(i)
             if item is None:
@@ -743,7 +1239,6 @@ class DragDropListWidget(QtWidgets.QListWidget):
             path = item.data(Qt.UserRole) or ""
             if path in path_to_star:
                 star = path_to_star[path]
-                # Reconnect signal with correct new row
                 try:
                     star.toggled.disconnect()
                 except Exception:
@@ -753,7 +1248,6 @@ class DragDropListWidget(QtWidgets.QListWidget):
                 self._position_star(i)
 
     def _on_star_toggled(self, row: int, state: bool):
-        # Nothing extra needed — file was already written by StarOverlay
         pass
 
     def clear_stars(self):
@@ -762,35 +1256,139 @@ class DragDropListWidget(QtWidgets.QListWidget):
         self._star_overlays.clear()
 
     def toggle_star_for_selected(self):
-        """Toggle star state for the currently focused item (S-key handler)."""
         sel = self.selectedItems()
         if not sel:
             return
         row  = self.row(sel[0])
         star = self._star_overlays.get(row)
         if star and star._supported:
-            # Simulate a click
             new_state = not star.is_starred()
             rating    = 5 if new_state else 0
             if set_image_rating(star._path, rating):
                 star.set_starred(new_state)
 
     def update_star_path(self, old_path: str, new_path: str):
-        """Call after renaming a file so the overlay tracks the new path."""
         for star in self._star_overlays.values():
             if star._path == old_path:
                 star.update_path(new_path)
                 break
 
+    # ── tag management ────────────────────────────────────────────────────────
+
+    def add_tag_for_item(self, row: int):
+        """Create and position a TagOverlay for the item at *row*."""
+        item = self.item(row)
+        if item is None:
+            return
+        path = item.data(Qt.UserRole) or ""
+        tag  = TagOverlay(self.viewport(), path, size=self._tag_size_for_thumb())
+        tag.tag_changed.connect(lambda text, r=row: self._on_tag_changed(r, text))
+        tag.show()
+        self._tag_overlays[row] = tag
+        self._position_tag(row)
+
+    def _position_tag(self, row: int):
+        """Move the TagOverlay for *row* to the top-LEFT corner of the cell."""
+        tag = self._tag_overlays.get(row)
+        if tag is None:
+            return
+        item = self.item(row)
+        if item is None:
+            return
+        rect   = self.visualItemRect(item)
+        margin = 4
+        tag.move(rect.left() + margin, rect.top() + margin)
+        tag.raise_()
+
+    def _rebuild_tag_index(self):
+        path_to_tag = {t._path: t for t in self._tag_overlays.values()}
+        self._tag_overlays.clear()
+
+        # Build a set of paths currently in the list
+        current_paths = set()
+        for i in range(self.count()):
+            item = self.item(i)
+            if item is not None:
+                current_paths.add(item.data(Qt.UserRole) or "")
+
+        # Destroy any overlay whose file is no longer in the list
+        for path, tov in list(path_to_tag.items()):
+            if path not in current_paths:
+                tov.hide()
+                tov.deleteLater()
+                del path_to_tag[path]
+
+        # Re-map surviving overlays to their new row numbers
+        for i in range(self.count()):
+            item = self.item(i)
+            if item is None:
+                continue
+            path = item.data(Qt.UserRole) or ""
+            if path in path_to_tag:
+                tov = path_to_tag[path]
+                try:
+                    tov.tag_changed.disconnect()
+                except Exception:
+                    pass
+                tov.tag_changed.connect(lambda text, r=i: self._on_tag_changed(r, text))
+                self._tag_overlays[i] = tov
+                self._position_tag(i)
+
+    def _on_tag_changed(self, row: int, text: str):
+        self.scene_tag_changed.emit()
+
+    def clear_tags(self):
+        for tov in self._tag_overlays.values():
+            tov.deleteLater()
+        self._tag_overlays.clear()
+
+    def update_tag_path(self, old_path: str, new_path: str):
+        for tov in self._tag_overlays.values():
+            if tov._path == old_path:
+                tov.update_path(new_path)
+                break
+
+    def get_active_scene_tag(self) -> str:
+        """
+        Return the scene tag that should be shown in the sticky banner.
+        This is the tag of the last tagged item whose top edge is at or above
+        the top of the currently visible viewport area.
+        """
+        viewport_top = self.verticalScrollBar().value()
+        best_tag     = ""
+        best_row     = -1
+        for row, tov in self._tag_overlays.items():
+            tag_text = tov.get_tag()
+            if not tag_text:
+                continue
+            item = self.item(row)
+            if item is None:
+                continue
+            rect = self.visualItemRect(item)
+            # rect is in viewport coordinates; add scroll offset for absolute position
+            item_top_abs = rect.top() + viewport_top
+            # Include items whose top is at/above the current viewport top
+            if item_top_abs <= viewport_top + self.viewport().height() // 2:
+                if row > best_row:
+                    best_row = row
+                    best_tag = tag_text
+        return best_tag
+
+    # ── combined clear (called on folder load) ────────────────────────────────
+
+    def clear_overlays(self):
+        self.clear_stars()
+        self.clear_tags()
+
     # ── overrides ─────────────────────────────────────────────────────────────
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        QTimer.singleShot(0, self._reposition_stars)
+        QTimer.singleShot(0, self._reposition_overlays)
 
     def scrollContentsBy(self, dx, dy):
         super().scrollContentsBy(dx, dy)
-        self._reposition_stars()
+        self._reposition_overlays()
 
     # ── existing methods (unchanged) ──────────────────────────────────────────
 
@@ -878,7 +1476,12 @@ class DragDropListWidget(QtWidgets.QListWidget):
         for star in self._star_overlays.values():
             star._size = new_star_sz
             star.setFixedSize(new_star_sz, new_star_sz)
-        QTimer.singleShot(200, self._reposition_stars)
+        # Resize tag overlays
+        new_tag_sz = self._tag_size_for_thumb()
+        for tov in self._tag_overlays.values():
+            tov._size = new_tag_sz
+            tov.setFixedSize(new_tag_sz, new_tag_sz)
+        QTimer.singleShot(200, self._reposition_overlays)
 
     def start_progressive_resize(self):
         self.resize_index = 0
@@ -899,7 +1502,7 @@ class DragDropListWidget(QtWidgets.QListWidget):
         if self.resize_index % 10 == 0:
             QApplication.processEvents()
         # Keep stars on top after repainting
-        QTimer.singleShot(0, self._reposition_stars)
+        QTimer.singleShot(0, self._reposition_overlays)
 
     def get_thumbnail_icon(self, path, force_regenerate=False):
         if not force_regenerate and path in self.thumbnail_cache:
@@ -980,7 +1583,8 @@ class DragDropListWidget(QtWidgets.QListWidget):
             self.item(insert_at + i).setSelected(True)
         e.acceptProposedAction()
         self._rebuild_star_index()
-        QTimer.singleShot(50, self._reposition_stars)
+        self._rebuild_tag_index()
+        QTimer.singleShot(50, self._reposition_overlays)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1469,13 +2073,66 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.list.double_right_clicked.connect(self.handle_double_right_click)
         self.list.b_key_pressed.connect(self.handle_b_key)
         self.list.preview_path_changed.connect(self.update_preview_from_path)
+        self.list.scene_tag_changed.connect(self._update_scene_banner)
+        self.list.verticalScrollBar().valueChanged.connect(self._update_scene_banner)
+
+        # ── Scene banner (sticky tag line above thumbnails) ───────────────────
+        self.scene_banner = QtWidgets.QWidget()
+        self.scene_banner.setFixedHeight(32)
+        self.scene_banner.setStyleSheet("""
+            QWidget {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #0d2a3a, stop:1 #0a1e2c);
+                border-bottom: 1px solid #1a4a6a;
+            }
+        """)
+        banner_layout = QtWidgets.QHBoxLayout(self.scene_banner)
+        banner_layout.setContentsMargins(12, 0, 12, 0)
+        banner_layout.setSpacing(8)
+
+        banner_icon = QtWidgets.QLabel("🏷")
+        banner_icon.setStyleSheet(
+            "background: transparent; border: none; font-size: 13px;")
+        banner_icon.setFixedWidth(20)
+
+        self.scene_banner_label = QtWidgets.QLabel("— no scene tag —")
+        self.scene_banner_label.setStyleSheet("""
+            QLabel {
+                background: transparent;
+                border: none;
+                color: #4a9abc;
+                font-size: 12px;
+                font-weight: 600;
+                font-style: italic;
+                letter-spacing: 0.3px;
+            }
+        """)
+
+        banner_hint = QtWidgets.QLabel(
+            "Click  T  on any thumbnail to set a scene tag")
+        banner_hint.setStyleSheet(
+            "background: transparent; border: none; "
+            "color: #2a5a7a; font-size: 10px;")
+        banner_hint.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+        banner_layout.addWidget(banner_icon)
+        banner_layout.addWidget(self.scene_banner_label, 1)
+        banner_layout.addWidget(banner_hint)
+
+        # Right-side container: banner on top, list below
+        right_container = QtWidgets.QWidget()
+        right_vbox = QtWidgets.QVBoxLayout(right_container)
+        right_vbox.setContentsMargins(0, 0, 0, 0)
+        right_vbox.setSpacing(0)
+        right_vbox.addWidget(self.scene_banner)
+        right_vbox.addWidget(self.list, 1)
 
         # ── Main layout ───────────────────────────────────────────────────────
         main_layout = QtWidgets.QHBoxLayout(central)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
         main_layout.addWidget(left_panel_widget)
-        main_layout.addWidget(self.list, 1)
+        main_layout.addWidget(right_container, 1)
 
         last_folder = self.settings.value("last_folder", "")
         if last_folder and os.path.isdir(last_folder):
@@ -1488,6 +2145,68 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.folder_watch_timer.start(5000)
 
         self.show()
+
+    # ── Scene banner ──────────────────────────────────────────────────────────
+
+    def _update_scene_banner(self):
+        """
+        Update the sticky scene-tag banner above the thumbnail grid.
+
+        Scans all tagged items to find the last one whose row position is at
+        or above the top of the currently visible viewport — exactly like the
+        PyCharm function-name breadcrumb that stays pinned when you scroll.
+        """
+        if self.list.count() == 0:
+            self.scene_banner_label.setText("— no scene tag —")
+            self.scene_banner_label.setStyleSheet("""
+                QLabel {
+                    background: transparent; border: none;
+                    color: #2a5a7a; font-size: 12px;
+                    font-weight: 600; font-style: italic;
+                }
+            """)
+            return
+
+        # Find the topmost visible item row
+        vp      = self.list.viewport()
+        top_pos = QtCore.QPoint(vp.width() // 2, 4)
+        top_item = self.list.itemAt(top_pos)
+        if top_item is None:
+            # Fallback: first item
+            top_item = self.list.item(0)
+        if top_item is None:
+            return
+        top_row = self.list.row(top_item)
+
+        # Walk backward from top_row to find the most recent tag at-or-above
+        active_tag = ""
+        active_row = -1
+        for row in range(top_row, -1, -1):
+            tov = self.list._tag_overlays.get(row)
+            if tov and tov.get_tag():
+                active_tag = tov.get_tag()
+                active_row = row
+                break
+
+        if active_tag:
+            self.scene_banner_label.setText(f"  {active_tag}")
+            self.scene_banner_label.setStyleSheet("""
+                QLabel {
+                    background: transparent; border: none;
+                    color: #32ade6; font-size: 12px;
+                    font-weight: 700; font-style: normal;
+                    letter-spacing: 0.3px;
+                }
+            """)
+        else:
+            self.scene_banner_label.setText("— no scene tag —")
+            self.scene_banner_label.setStyleSheet("""
+                QLabel {
+                    background: transparent; border: none;
+                    color: #2a5a7a; font-size: 12px;
+                    font-weight: 600; font-style: italic;
+                }
+            """)
 
     # ── B-key ─────────────────────────────────────────────────────────────────
 
@@ -1629,7 +2348,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             return
         self._progress_start()
         QApplication.processEvents()
-        self.list.clear_stars()
+        self.list.clear_overlays()
         self.list.clear()
         self.list.thumbnail_cache.clear()
         files = [f for f in os.listdir(self.folder)
@@ -1643,12 +2362,14 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             item.setIcon(self.list.get_thumbnail_icon(path))
             self.list.addItem(item)
             self.list.add_star_for_item(idx)
+            self.list.add_tag_for_item(idx)
             progress = int(((idx + 1) / total_files) * 100) if total_files > 0 else 100
             self.progress_bar.setValue(progress)
             QApplication.processEvents()
         self._progress_done()
         # Final reposition after all items are laid out
-        QTimer.singleShot(100, self.list._reposition_stars)
+        QTimer.singleShot(100, self.list._reposition_overlays)
+        QTimer.singleShot(150, self._update_scene_banner)
         self.current_folder_files = set(files)
         self.update_status_label(in_sync=True)
         self.setWindowTitle(
@@ -1673,8 +2394,12 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                 star = self.list._star_overlays.pop(row, None)
                 if star:
                     star.deleteLater()
+                tov = self.list._tag_overlays.pop(row, None)
+                if tov:
+                    tov.deleteLater()
                 self.list.takeItem(row)
             self.list._rebuild_star_index()
+            self.list._rebuild_tag_index()
             self.current_folder_files = current_files
 
             removed_sorted = sorted(removed, key=natural_key)
@@ -1815,11 +2540,13 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             self.list.addItem(item)
             row = self.list.count() - 1
             self.list.add_star_for_item(row)
+            self.list.add_tag_for_item(row)
             self.progress_bar.setValue(int(((idx + 1) / max(total, 1)) * 100))
             QApplication.processEvents()
 
         self._progress_done()
-        QTimer.singleShot(100, self.list._reposition_stars)
+        QTimer.singleShot(100, self.list._reposition_overlays)
+        QTimer.singleShot(150, self._update_scene_banner)
         final_files = [f for f in os.listdir(self.folder)
                        if os.path.splitext(f)[1].lower() in SUPPORTED_EXT]
         self.current_folder_files = set(final_files)
@@ -1910,7 +2637,8 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.list.setUpdatesEnabled(True)
         self.list.scrollToTop()
         self.list._rebuild_star_index()
-        QTimer.singleShot(50, self.list._reposition_stars)
+        self.list._rebuild_tag_index()
+        QTimer.singleShot(50, self.list._reposition_overlays)
 
     def move_to_bottom(self):
         items = sorted(self.list.selectedItems(), key=lambda x: self.list.row(x))
@@ -1926,7 +2654,8 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.list.setUpdatesEnabled(True)
         self.list.scrollToBottom()
         self.list._rebuild_star_index()
-        QTimer.singleShot(50, self.list._reposition_stars)
+        self.list._rebuild_tag_index()
+        QTimer.singleShot(50, self.list._reposition_overlays)
 
     # ── Rename All ────────────────────────────────────────────────────────────
 
@@ -1952,6 +2681,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             try:
                 os.rename(old, tmp)
                 self.list.update_star_path(old, tmp)
+                self.list.update_tag_path(old, tmp)
                 temp_paths.append((item, tmp, ext))
             except Exception:
                 continue
@@ -1963,6 +2693,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             try:
                 os.rename(tmp, new)
                 self.list.update_star_path(tmp, new)
+                self.list.update_tag_path(tmp, new)
                 item.setData(Qt.UserRole, new)
                 item.setText(os.path.basename(new))
                 renamed += 1
@@ -2017,6 +2748,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             try:
                 os.rename(old_path, new_path)
                 self.list.update_star_path(old_path, new_path)
+                self.list.update_tag_path(old_path, new_path)
                 item.setText(new_name)
                 item.setData(Qt.UserRole, new_path)
                 used_names.add(new_name)
@@ -2052,7 +2784,8 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         if new_items:
             self.list.scrollToItem(new_items[0], QAbstractItemView.PositionAtCenter)
         self.list._rebuild_star_index()
-        QTimer.singleShot(50, self.list._reposition_stars)
+        self.list._rebuild_tag_index()
+        QTimer.singleShot(50, self.list._reposition_overlays)
         QtWidgets.QMessageBox.information(
             self, "Success",
             f"Renamed and placed {len(new_items)} images perfectly!")
@@ -2095,6 +2828,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                     self.list.thumbnail_cache[tmp_path] = \
                         self.list.thumbnail_cache.pop(old_path)
                 self.list.update_star_path(old_path, tmp_path)
+                self.list.update_tag_path(old_path, tmp_path)
                 item.setData(Qt.UserRole, tmp_path)
                 temp_entries.append((item, tmp_path, ext))
             except Exception:
@@ -2114,6 +2848,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                     self.list.thumbnail_cache[new_path] = \
                         self.list.thumbnail_cache.pop(tmp_path)
                 self.list.update_star_path(tmp_path, new_path)
+                self.list.update_tag_path(tmp_path, new_path)
                 renamed += 1
                 renamed_items_ordered.append(item)
             except Exception:
@@ -2130,7 +2865,8 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             self.list.scrollToItem(
                 renamed_items_ordered[0], QAbstractItemView.PositionAtCenter)
         self.list._rebuild_star_index()
-        QTimer.singleShot(50, self.list._reposition_stars)
+        self.list._rebuild_tag_index()
+        QTimer.singleShot(50, self.list._reposition_overlays)
         QtWidgets.QMessageBox.information(
             self, "Done",
             f"Re-enumerated {renamed} images with base name '{base}'.")
