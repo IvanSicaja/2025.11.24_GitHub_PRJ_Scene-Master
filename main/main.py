@@ -1402,6 +1402,11 @@ class DragDropListWidget(QtWidgets.QListWidget):
                 if path:
                     self._last_preview_path = path
                     self.preview_path_changed.emit(path)
+        elif event.button() == Qt.RightButton:
+            item = self.itemAt(event.pos())
+            if item:
+                name_no_ext = os.path.splitext(item.text())[0]
+                self.b_key_pressed.emit(name_no_ext)
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event):
@@ -1423,6 +1428,26 @@ class DragDropListWidget(QtWidgets.QListWidget):
         # S key: toggle star for selected thumbnail
         if event.key() == Qt.Key_S:
             self.toggle_star_for_selected()
+            event.accept()
+            return
+        # F key: mark all selected as favorite (star them)
+        if event.key() == Qt.Key_F:
+            for item in self.selectedItems():
+                row  = self.row(item)
+                star = self._star_overlays.get(row)
+                if star and star._supported and not star.is_starred():
+                    if set_image_rating(star._path, 5):
+                        star.set_starred(True)
+            event.accept()
+            return
+        # G key: unstar all selected (remove favorite)
+        if event.key() == Qt.Key_G:
+            for item in self.selectedItems():
+                row  = self.row(item)
+                star = self._star_overlays.get(row)
+                if star and star._supported and star.is_starred():
+                    if set_image_rating(star._path, 0):
+                        star.set_starred(False)
             event.accept()
             return
         # B key: copy selected image name (no ext) to base name field
@@ -1991,7 +2016,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
 
         export_fav_btn = QtWidgets.QPushButton("⭐  Export Favorites to Subfolder")
         export_fav_btn.setToolTip(
-            "Copies all ★-starred images into a subfolder called '00-favorites'\n"
+            "Copies all ★-starred images into a subfolder called '00_favorites'\n"
             "inside the currently open folder. Original files are not moved or renamed.")
         export_fav_btn.setStyleSheet("""
             QPushButton {
@@ -2877,7 +2902,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
     def export_favorites(self):
         """
         Copy every ★-starred image in the current list into a subfolder named
-        '00-favorites' inside the open folder.  Originals are never moved or
+        '00_favorites' inside the open folder.  Originals are never moved or
         modified — only copied.  If a file with the same name already exists
         in the destination it is silently skipped (no overwrite).
         """
@@ -2906,7 +2931,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                 "and press S, to mark it.")
             return
 
-        dest_folder = os.path.join(self.folder, "00-favorites")
+        dest_folder = os.path.join(self.folder, "00_favorites")
         try:
             os.makedirs(dest_folder, exist_ok=True)
         except Exception as e:
