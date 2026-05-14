@@ -1124,11 +1124,12 @@ class TagOverlay(QtWidgets.QWidget):
 
 
 class DragDropListWidget(QtWidgets.QListWidget):
-    double_left_clicked  = QtCore.pyqtSignal(str, str)
-    double_right_clicked = QtCore.pyqtSignal(str)
-    b_key_pressed        = QtCore.pyqtSignal(str)
-    preview_path_changed = QtCore.pyqtSignal(str)
-    scene_tag_changed    = QtCore.pyqtSignal()   # emitted when any tag is set/cleared
+    double_left_clicked      = QtCore.pyqtSignal(str, str)
+    double_right_clicked     = QtCore.pyqtSignal(str)
+    b_key_pressed            = QtCore.pyqtSignal(str)
+    preview_path_changed     = QtCore.pyqtSignal(str)
+    scene_tag_changed        = QtCore.pyqtSignal()
+    open_fullscreen_requested = QtCore.pyqtSignal(int)   # emits row index   # emitted when any tag is set/cleared
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1430,8 +1431,8 @@ class DragDropListWidget(QtWidgets.QListWidget):
             self.toggle_star_for_selected()
             event.accept()
             return
-        # F key: mark all selected as favorite (star them)
-        if event.key() == Qt.Key_F:
+        # R key: mark all selected as favorite (star them)
+        if event.key() == Qt.Key_R:
             for item in self.selectedItems():
                 row  = self.row(item)
                 star = self._star_overlays.get(row)
@@ -1440,14 +1441,22 @@ class DragDropListWidget(QtWidgets.QListWidget):
                         star.set_starred(True)
             event.accept()
             return
-        # G key: unstar all selected (remove favorite)
-        if event.key() == Qt.Key_G:
+        # D key: unstar all selected (remove favorite)
+        if event.key() == Qt.Key_D:
             for item in self.selectedItems():
                 row  = self.row(item)
                 star = self._star_overlays.get(row)
                 if star and star._supported and star.is_starred():
                     if set_image_rating(star._path, 0):
                         star.set_starred(False)
+            event.accept()
+            return
+        # F key: open fullscreen viewer for current/selected image
+        if event.key() == Qt.Key_F:
+            sel = self.selectedItems()
+            row = self.row(sel[0]) if sel else self.currentRow()
+            if row >= 0:
+                self.open_fullscreen_requested.emit(row)
             event.accept()
             return
         # B key: copy selected image name (no ext) to base name field
@@ -1613,6 +1622,470 @@ class DragDropListWidget(QtWidgets.QListWidget):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  FullscreenViewer
+#  ─ Opens as a true fullscreen window showing the selected image.
+#  ─ Bottom strip shows 5 film-strip thumbnails: prev2 | prev1 | CURRENT | next1 | next2
+#  ─ Keyboard:  ← → ↑ ↓  navigate    F  close    R  star    D  unstar    T  tag dialog
+#  ─ Clicking a strip thumbnail jumps to that image.
+# ──────────────────────────────────────────────────────────────────────────────
+
+class FullscreenViewer(QtWidgets.QWidget):
+    """Fullscreen gallery viewer with film-strip, ratings and tag editing."""
+
+    # Signals emitted back to ImageOrganizer so overlays stay in sync
+    star_changed  = QtCore.pyqtSignal(int, bool)   # (row, starred)
+    tag_changed   = QtCore.pyqtSignal(int, str)    # (row, tag_text)
+    row_changed   = QtCore.pyqtSignal(int)         # current row changed
+
+    _STRIP_W    = 110   # film-strip thumbnail width
+    _STRIP_H    = 80    # film-strip thumbnail height
+    _STRIP_GAP  = 10
+    _BAR_H      = 110   # total height of the bottom bar
+
+    def __init__(self, list_widget: 'DragDropListWidget', start_row: int,
+                 parent=None):
+        super().__init__(parent, Qt.Window | Qt.FramelessWindowHint)
+        self._list      = list_widget
+        self._row       = start_row
+        self._total     = list_widget.count()
+        self._thumb_cache: dict[int, QtGui.QPixmap] = {}
+
+        self.setWindowTitle("Scenify — Fullscreen")
+        self.setStyleSheet("background: #000000;")
+        self.setFocusPolicy(Qt.StrongFocus)
+
+        # ── Main image label ──────────────────────────────────────────────────
+        self._img_label = QtWidgets.QLabel(self)
+        self._img_label.setAlignment(Qt.AlignCenter)
+        self._img_label.setStyleSheet("background: #000000; border: none;")
+
+        # ── Bottom bar ────────────────────────────────────────────────────────
+        self._bar = QtWidgets.QWidget(self)
+        self._bar.setStyleSheet("""
+            QWidget {
+                background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+                    stop:0 #0a0a0a, stop:1 #141416);
+                border-top: 1px solid #2a2a2c;
+            }
+        """)
+        bar_layout = QtWidgets.QHBoxLayout(self._bar)
+        bar_layout.setContentsMargins(20, 10, 20, 10)
+        bar_layout.setSpacing(self._STRIP_GAP)
+
+        # Left side: info labels
+        info_widget = QtWidgets.QWidget()
+        info_widget.setStyleSheet("background: transparent; border: none;")
+        info_layout = QtWidgets.QVBoxLayout(info_widget)
+        info_layout.setContentsMargins(0, 0, 0, 0)
+        info_layout.setSpacing(2)
+
+        self._name_label = QtWidgets.QLabel()
+        self._name_label.setStyleSheet(
+            "color: #e0e0e0; font-size: 13px; font-weight: 600; "
+            "background: transparent; border: none;")
+
+        self._meta_label = QtWidgets.QLabel()
+        self._meta_label.setStyleSheet(
+            "color: #636366; font-size: 11px; background: transparent; border: none;")
+
+        self._tag_label = QtWidgets.QLabel()
+        self._tag_label.setStyleSheet(
+            "color: #32ade6; font-size: 11px; font-weight: 600; "
+            "background: transparent; border: none;")
+
+        info_layout.addWidget(self._name_label)
+        info_layout.addWidget(self._meta_label)
+        info_layout.addWidget(self._tag_label)
+        info_layout.addStretch()
+
+        # Keyboard hint
+        hint = QtWidgets.QLabel(
+            "← →  Navigate    R  Star    D  Unstar    T  Tag    F  Close")
+        hint.setStyleSheet(
+            "color: #3a3a4a; font-size: 10px; background: transparent; border: none;")
+
+        # Film-strip: 5 clickable thumbnail cells
+        self._strip_cells: list[QtWidgets.QLabel] = []
+        strip_widget = QtWidgets.QWidget()
+        strip_widget.setStyleSheet("background: transparent; border: none;")
+        strip_hbox = QtWidgets.QHBoxLayout(strip_widget)
+        strip_hbox.setContentsMargins(0, 0, 0, 0)
+        strip_hbox.setSpacing(self._STRIP_GAP)
+
+        for i in range(5):
+            cell = QtWidgets.QLabel()
+            cell.setFixedSize(self._STRIP_W, self._STRIP_H)
+            cell.setAlignment(Qt.AlignCenter)
+            cell.setStyleSheet("""
+                QLabel {
+                    background: #1a1a1c;
+                    border: 1px solid #2a2a2c;
+                    border-radius: 4px;
+                }
+            """)
+            offset = i - 2   # -2, -1, 0, +1, +2
+            cell.mousePressEvent = lambda e, off=offset: self._strip_clicked(off)
+            cell.setCursor(Qt.PointingHandCursor)
+            self._strip_cells.append(cell)
+            strip_hbox.addWidget(cell)
+
+        # Right action buttons
+        btn_style_star = """
+            QPushButton {
+                background: #2a2000; color: #ffd60a; border: 1px solid #665500;
+                border-radius: 6px; font-size: 12px; font-weight: 700;
+                padding: 6px 14px;
+            }
+            QPushButton:hover  { background: #3a3000; border-color: #998800; }
+            QPushButton:pressed { background: #1a1400; }
+        """
+        btn_style_tag = """
+            QPushButton {
+                background: #0d2233; color: #32ade6; border: 1px solid #1a5580;
+                border-radius: 6px; font-size: 12px; font-weight: 700;
+                padding: 6px 14px;
+            }
+            QPushButton:hover  { background: #1a3a5a; border-color: #2a80c0; }
+            QPushButton:pressed { background: #081522; }
+        """
+        btn_style_close = """
+            QPushButton {
+                background: #2a1a1a; color: #ff6b6b; border: 1px solid #7a2020;
+                border-radius: 6px; font-size: 12px; font-weight: 700;
+                padding: 6px 14px;
+            }
+            QPushButton:hover  { background: #3a1a1a; border-color: #cc3030; }
+            QPushButton:pressed { background: #1a0a0a; }
+        """
+
+        self._star_btn = QtWidgets.QPushButton("★  Star  (R)")
+        self._star_btn.setStyleSheet(btn_style_star)
+        self._star_btn.setFixedHeight(34)
+        self._star_btn.clicked.connect(self._toggle_star)
+
+        tag_btn = QtWidgets.QPushButton("🏷  Tag  (T)")
+        tag_btn.setStyleSheet(btn_style_tag)
+        tag_btn.setFixedHeight(34)
+        tag_btn.clicked.connect(self._open_tag_dialog)
+
+        close_btn = QtWidgets.QPushButton("✕  Close  (F)")
+        close_btn.setStyleSheet(btn_style_close)
+        close_btn.setFixedHeight(34)
+        close_btn.clicked.connect(self.close)
+
+        actions_widget = QtWidgets.QWidget()
+        actions_widget.setStyleSheet("background: transparent; border: none;")
+        actions_vbox = QtWidgets.QVBoxLayout(actions_widget)
+        actions_vbox.setContentsMargins(0, 0, 0, 0)
+        actions_vbox.setSpacing(6)
+        actions_vbox.addWidget(self._star_btn)
+        actions_vbox.addWidget(tag_btn)
+        actions_vbox.addWidget(close_btn)
+
+        bar_layout.addWidget(info_widget)
+        bar_layout.addWidget(hint, 0, Qt.AlignBottom)
+        bar_layout.addStretch(1)
+        bar_layout.addWidget(strip_widget, 0, Qt.AlignVCenter)
+        bar_layout.addStretch(1)
+        bar_layout.addWidget(actions_widget, 0, Qt.AlignVCenter)
+
+        self._update_display()
+
+    # ── geometry ──────────────────────────────────────────────────────────────
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        screen = QtWidgets.QApplication.primaryScreen()
+        if screen:
+            self.setGeometry(screen.geometry())
+        self._layout_children()
+        self._update_display()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._layout_children()
+
+    def _layout_children(self):
+        w = self.width()
+        h = self.height()
+        self._bar.setGeometry(0, h - self._BAR_H, w, self._BAR_H)
+        self._img_label.setGeometry(0, 0, w, h - self._BAR_H)
+
+    # ── navigation ────────────────────────────────────────────────────────────
+
+    def _go(self, delta: int):
+        new_row = self._row + delta
+        if 0 <= new_row < self._total:
+            self._row = new_row
+            self.row_changed.emit(self._row)
+            self._update_display()
+
+    def _strip_clicked(self, offset: int):
+        new_row = self._row + offset
+        if 0 <= new_row < self._total:
+            self._row = new_row
+            self.row_changed.emit(self._row)
+            self._update_display()
+
+    # ── display ───────────────────────────────────────────────────────────────
+
+    def _update_display(self):
+        item = self._list.item(self._row)
+        if item is None:
+            return
+        path = item.data(Qt.UserRole) or ""
+
+        # Main image
+        if os.path.exists(path):
+            pix = QtGui.QPixmap(path)
+            if not pix.isNull():
+                avail_w = self.width()
+                avail_h = self.height() - self._BAR_H
+                if avail_w > 0 and avail_h > 0:
+                    scaled = pix.scaled(avail_w, avail_h,
+                                        Qt.KeepAspectRatio,
+                                        Qt.SmoothTransformation)
+                    self._img_label.setPixmap(scaled)
+
+        # Info labels
+        self._name_label.setText(os.path.basename(path))
+        self._meta_label.setText(f"Image {self._row + 1} of {self._total}")
+
+        tag_text = get_image_tag(path)
+        self._tag_label.setText(f"🏷  {tag_text}" if tag_text else "")
+
+        # Star button label
+        is_starred = (get_image_rating(path) == 5)
+        self._star_btn.setText(
+            "★  Unstar  (R)" if is_starred else "★  Star  (R)"
+        )
+        starred_style = """
+            QPushButton {
+                background: #2a2000; color: #ffd60a; border: 1px solid #ffd60a;
+                border-radius: 6px; font-size: 12px; font-weight: 700;
+                padding: 6px 14px;
+            }
+            QPushButton:hover  { background: #3a3000; }
+        """ if is_starred else """
+            QPushButton {
+                background: #1a1a1c; color: #888888; border: 1px solid #3a3a3c;
+                border-radius: 6px; font-size: 12px; font-weight: 700;
+                padding: 6px 14px;
+            }
+            QPushButton:hover  { background: #2a2a2c; color: #ffd60a; }
+        """
+        self._star_btn.setStyleSheet(starred_style)
+
+        # Film-strip: positions -2, -1, 0, +1, +2
+        for idx, cell in enumerate(self._strip_cells):
+            offset   = idx - 2
+            row      = self._row + offset
+            is_center = (offset == 0)
+
+            if row < 0 or row >= self._total:
+                cell.setPixmap(QtGui.QPixmap())
+                cell.setText("")
+                cell.setStyleSheet("""
+                    QLabel {
+                        background: #0d0d0e;
+                        border: 1px solid #1a1a1c;
+                        border-radius: 4px;
+                    }
+                """)
+                cell.setCursor(Qt.ArrowCursor)
+                continue
+
+            # Thumbnail
+            thumb = self._get_strip_thumb(row)
+            if thumb:
+                cell.setPixmap(thumb)
+                cell.setText("")
+            else:
+                cell.clear()
+
+            if is_center:
+                cell.setStyleSheet("""
+                    QLabel {
+                        background: #0d2233;
+                        border: 2px solid #32ade6;
+                        border-radius: 6px;
+                    }
+                """)
+                cell.setCursor(Qt.ArrowCursor)
+            else:
+                cell.setStyleSheet("""
+                    QLabel {
+                        background: #1a1a1c;
+                        border: 1px solid #2a2a2c;
+                        border-radius: 4px;
+                    }
+                    QLabel:hover {
+                        border: 1px solid #3a3a5a;
+                    }
+                """)
+                cell.setCursor(Qt.PointingHandCursor)
+
+    def _get_strip_thumb(self, row: int) -> QtGui.QPixmap | None:
+        if row in self._thumb_cache:
+            return self._thumb_cache[row]
+        item = self._list.item(row)
+        if item is None:
+            return None
+        path = item.data(Qt.UserRole) or ""
+        if not os.path.exists(path):
+            return None
+        pix = QtGui.QPixmap(path)
+        if pix.isNull():
+            return None
+        thumb = pix.scaled(self._STRIP_W, self._STRIP_H,
+                            Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self._thumb_cache[row] = thumb
+        return thumb
+
+    # ── actions ───────────────────────────────────────────────────────────────
+
+    def _toggle_star(self):
+        item = self._list.item(self._row)
+        if item is None:
+            return
+        path      = item.data(Qt.UserRole) or ""
+        ext       = os.path.splitext(path)[1].lower()
+        if ext not in XMP_SUPPORTED_EXT:
+            return
+        is_starred = (get_image_rating(path) == 5)
+        new_rating = 0 if is_starred else 5
+        if set_image_rating(path, new_rating):
+            # Sync back to main list overlay
+            star = self._list._star_overlays.get(self._row)
+            if star:
+                star.set_starred(new_rating == 5)
+            self.star_changed.emit(self._row, new_rating == 5)
+            self._update_display()
+
+    def _open_tag_dialog(self):
+        item = self._list.item(self._row)
+        if item is None:
+            return
+        path = item.data(Qt.UserRole) or ""
+        ext  = os.path.splitext(path)[1].lower()
+        if ext not in XMP_SUPPORTED_EXT:
+            return
+
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("Scene Tag")
+        dlg.setMinimumWidth(400)
+        dlg.setStyleSheet("""
+            QDialog   { background: #1c1c1e; color: #e0e0e0; }
+            QLabel    { color: #a0a0a0; font-size: 11px; background: transparent; border: none; }
+            QLineEdit {
+                background: #2c2c2e; border: 1px solid #3a3a3c;
+                border-radius: 6px; padding: 6px 10px; color: #e0e0e0;
+                font-size: 13px; selection-background-color: #0066CC;
+            }
+            QLineEdit:focus { border: 1px solid #32ade6; }
+        """)
+        layout = QtWidgets.QVBoxLayout(dlg)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(10)
+
+        header = QtWidgets.QLabel(
+            f"<b style='color:#32ade6;font-size:13px;'>🏷  Scene Tag</b><br>"
+            f"<span style='color:#636366;font-size:10px;'>{os.path.basename(path)}</span>")
+        header.setTextFormat(Qt.RichText)
+        layout.addWidget(header)
+
+        current_tag = get_image_tag(path)
+        edit = QtWidgets.QLineEdit(current_tag)
+        edit.setPlaceholderText("e.g.  Garage interior  /  Night scene  /  Act 2")
+        edit.setClearButtonEnabled(True)
+        layout.addWidget(edit)
+
+        btn_row = QtWidgets.QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        cancel_btn = QtWidgets.QPushButton("Cancel")
+        cancel_btn.setFixedHeight(30)
+        cancel_btn.setStyleSheet(
+            "QPushButton { background: #3a3a3c; color: #e0e0e0; border: none; "
+            "border-radius: 6px; font-weight: 600; padding: 4px 18px; }"
+            "QPushButton:hover { background: #48484a; }")
+        cancel_btn.clicked.connect(dlg.reject)
+
+        clear_btn = QtWidgets.QPushButton("Remove Tag")
+        clear_btn.setFixedHeight(30)
+        clear_btn.setStyleSheet(
+            "QPushButton { background: #3a1a1a; color: #ff6b6b; "
+            "border: 1px solid #7a2020; border-radius: 6px; font-weight: 600; padding: 4px 18px; }"
+            "QPushButton:hover { background: #5a1a1a; }")
+        clear_btn.clicked.connect(lambda: (edit.clear(), dlg.accept()))
+
+        ok_btn = QtWidgets.QPushButton("Save Tag")
+        ok_btn.setFixedHeight(30)
+        ok_btn.setDefault(True)
+        ok_btn.setStyleSheet(
+            "QPushButton { background: #1a3a5a; color: #32ade6; "
+            "border: 1px solid #1a6a9a; border-radius: 6px; font-weight: 700; padding: 4px 18px; }"
+            "QPushButton:hover { background: #1a4a7a; }")
+        ok_btn.clicked.connect(dlg.accept)
+
+        btn_row.addWidget(cancel_btn)
+        btn_row.addStretch()
+        btn_row.addWidget(clear_btn)
+        btn_row.addWidget(ok_btn)
+        layout.addLayout(btn_row)
+        edit.setFocus()
+        edit.selectAll()
+
+        if dlg.exec_() == QtWidgets.QDialog.Accepted:
+            new_tag = edit.text().strip()
+            if new_tag != current_tag:
+                if set_image_tag(path, new_tag):
+                    # Sync back to main list overlay
+                    tov = self._list._tag_overlays.get(self._row)
+                    if tov:
+                        tov.set_tag(new_tag)
+                    self.tag_changed.emit(self._row, new_tag)
+                    self._update_display()
+
+    # ── events ────────────────────────────────────────────────────────────────
+
+    def keyPressEvent(self, event):
+        key = event.key()
+        if key in (Qt.Key_Left, Qt.Key_Up):
+            self._go(-1)
+        elif key in (Qt.Key_Right, Qt.Key_Down):
+            self._go(1)
+        elif key == Qt.Key_F:
+            self.close()
+        elif key == Qt.Key_R:
+            self._toggle_star()
+        elif key == Qt.Key_D:
+            # Force unstar
+            item = self._list.item(self._row)
+            if item:
+                path = item.data(Qt.UserRole) or ""
+                if os.path.splitext(path)[1].lower() in XMP_SUPPORTED_EXT:
+                    if get_image_rating(path) == 5:
+                        if set_image_rating(path, 0):
+                            star = self._list._star_overlays.get(self._row)
+                            if star:
+                                star.set_starred(False)
+                            self.star_changed.emit(self._row, False)
+                            self._update_display()
+        elif key == Qt.Key_T:
+            self._open_tag_dialog()
+        elif key == Qt.Key_Escape:
+            self.close()
+        else:
+            super().keyPressEvent(event)
+
+    def mousePressEvent(self, event):
+        # Click on main image area also grabs focus for keys
+        self.setFocus()
+        super().mousePressEvent(event)
+
 
 PROGRESS_IDLE_STYLE = """
     QProgressBar {
@@ -2100,6 +2573,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.list.preview_path_changed.connect(self.update_preview_from_path)
         self.list.scene_tag_changed.connect(self._update_scene_banner)
         self.list.verticalScrollBar().valueChanged.connect(self._update_scene_banner)
+        self.list.open_fullscreen_requested.connect(self._open_fullscreen)
 
         # ── Scene banner (sticky tag line above thumbnails) ───────────────────
         self.scene_banner = QtWidgets.QWidget()
@@ -2177,44 +2651,61 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         """
         Update the sticky scene-tag banner above the thumbnail grid.
 
-        Scans all tagged items to find the last one whose row position is at
-        or above the top of the currently visible viewport — exactly like the
-        PyCharm function-name breadcrumb that stays pinned when you scroll.
+        Works like the PyCharm function breadcrumb: the banner always shows the
+        tag of the last tagged image that has scrolled into or above the visible
+        area — and it stays shown until a newer tag scrolls in from below.
+
+        Approach: scan every item's visualItemRect (which is in viewport
+        coordinates and is always correct regardless of image size or spacing),
+        find the topmost item that is at least partially visible, then walk
+        backward from that row to find the nearest tag at or above it.
+        This is robust for mixed-size images, large images, and empty gaps.
         """
         if self.list.count() == 0:
-            self.scene_banner_label.setText("— no scene tag —")
-            self.scene_banner_label.setStyleSheet("""
-                QLabel {
-                    background: transparent; border: none;
-                    color: #2a5a7a; font-size: 12px;
-                    font-weight: 600; font-style: italic;
-                }
-            """)
+            self._set_banner_text("", "— no scene tag —")
             return
 
-        # Find the topmost visible item row
-        vp      = self.list.viewport()
-        top_pos = QtCore.QPoint(vp.width() // 2, 4)
-        top_item = self.list.itemAt(top_pos)
-        if top_item is None:
-            # Fallback: first item
-            top_item = self.list.item(0)
-        if top_item is None:
-            return
-        top_row = self.list.row(top_item)
+        vp_height   = self.list.viewport().height()
+        top_row     = -1
+        top_y       = vp_height + 1   # start with a value beyond the viewport
 
-        # Walk backward from top_row to find the most recent tag at-or-above
+        for i in range(self.list.count()):
+            item = self.list.item(i)
+            if item is None:
+                continue
+            rect = self.list.visualItemRect(item)
+            # An item is "at least partially visible" if its bottom is above
+            # the viewport bottom AND its top is above the viewport height.
+            # We want the one whose top edge is closest to (but still within) 0.
+            if rect.bottom() < 0:
+                # Entirely above the viewport — this is a candidate for top_row
+                # because it represents where we "came from"; keep the last such row.
+                top_row = i
+            elif rect.top() < vp_height:
+                # At least partially visible from the top
+                if top_row == -1:
+                    # No fully-scrolled-past item yet — this is the first visible row
+                    top_row = i
+                break   # first partially/fully visible item found; stop scanning
+
+        # If everything is scrolled past the bottom (shouldn't happen), use last row
+        if top_row == -1:
+            top_row = self.list.count() - 1
+
+        # Walk backward from top_row to find the nearest tag at or above
         active_tag = ""
-        active_row = -1
         for row in range(top_row, -1, -1):
             tov = self.list._tag_overlays.get(row)
             if tov and tov.get_tag():
                 active_tag = tov.get_tag()
-                active_row = row
                 break
 
-        if active_tag:
-            self.scene_banner_label.setText(f"  {active_tag}")
+        self._set_banner_text(active_tag)
+
+    def _set_banner_text(self, tag: str, override: str = ""):
+        """Helper — updates the banner label text and style."""
+        if tag:
+            self.scene_banner_label.setText(f"  {tag}")
             self.scene_banner_label.setStyleSheet("""
                 QLabel {
                     background: transparent; border: none;
@@ -2224,7 +2715,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                 }
             """)
         else:
-            self.scene_banner_label.setText("— no scene tag —")
+            self.scene_banner_label.setText(override or "— no scene tag —")
             self.scene_banner_label.setStyleSheet("""
                 QLabel {
                     background: transparent; border: none;
@@ -2232,6 +2723,37 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                     font-weight: 600; font-style: italic;
                 }
             """)
+
+    # ── Fullscreen viewer ─────────────────────────────────────────────────────
+
+    def _open_fullscreen(self, start_row: int):
+        """Open the fullscreen gallery viewer at *start_row*."""
+        if self.list.count() == 0:
+            return
+        viewer = FullscreenViewer(self.list, start_row, parent=None)
+        viewer.row_changed.connect(self._on_fullscreen_row_changed)
+        viewer.star_changed.connect(self._on_fullscreen_star_changed)
+        viewer.tag_changed.connect(self._on_fullscreen_tag_changed)
+        viewer.setAttribute(Qt.WA_DeleteOnClose, True)
+        viewer.showFullScreen()
+        viewer.setFocus()
+
+    def _on_fullscreen_row_changed(self, row: int):
+        """Keep the thumbnail grid in sync with fullscreen navigation."""
+        if 0 <= row < self.list.count():
+            self.list.clearSelection()
+            item = self.list.item(row)
+            if item:
+                item.setSelected(True)
+                self.list.scrollToItem(item, QAbstractItemView.PositionAtCenter)
+
+    def _on_fullscreen_star_changed(self, row: int, starred: bool):
+        """Star overlay in main grid already updated by FullscreenViewer; emit scene banner refresh."""
+        self._update_scene_banner()
+
+    def _on_fullscreen_tag_changed(self, row: int, tag_text: str):
+        """Tag overlay in main grid already updated by FullscreenViewer; refresh banner."""
+        self._update_scene_banner()
 
     # ── B-key ─────────────────────────────────────────────────────────────────
 
