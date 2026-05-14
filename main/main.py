@@ -1670,9 +1670,9 @@ class FullscreenViewer(QtWidgets.QWidget):
     _STRIP_W   = 110
     _STRIP_H   = 80
     _STRIP_GAP = 10
-    _BAR_H     = 130
-    _BTN_H     = 28
-    _BTN_W     = 190
+    _BAR_H     = 134
+    _BTN_H     = 26
+    _BTN_W     = 188
 
     def __init__(self, list_widget, start_row, parent=None):
         super().__init__(parent, Qt.Window | Qt.FramelessWindowHint)
@@ -1735,8 +1735,8 @@ class FullscreenViewer(QtWidgets.QWidget):
             QPushButton {
                 background: #2a1010; color: #ff5555;
                 border: 1px solid #7a2020;
-                border-radius: 6px; font-size: 11px; font-weight: 700;
-                padding: 4px 10px;
+                border-radius: 6px; font-size: 10px; font-weight: 700;
+                padding: 3px 10px;
             }
             QPushButton:hover   { background: #3a1515; border-color: #cc3030; color: #ff8080; }
             QPushButton:pressed { background: #1a0808; }
@@ -1754,8 +1754,8 @@ class FullscreenViewer(QtWidgets.QWidget):
             QPushButton {
                 background: #1c1010; color: #886060;
                 border: 1px solid #4a2020;
-                border-radius: 6px; font-size: 11px; font-weight: 600;
-                padding: 4px 10px;
+                border-radius: 6px; font-size: 10px; font-weight: 600;
+                padding: 3px 10px;
             }
             QPushButton:hover   { background: #2a1515; color: #cc8888;
                                    border-color: #884040; }
@@ -1974,7 +1974,7 @@ class FullscreenViewer(QtWidgets.QWidget):
             self._star_overlay_lbl.setText("★")
             self._star_overlay_lbl.setStyleSheet(
                 "background: transparent; border: none; font-size: 26px; "
-                "color: rgba(255, 204, 0, 102);")   # 102/255 ≈ 40%
+                "color: rgba(255, 204, 0, 255);")   # 102/255 ≈ 40%
         else:
             # Faint white hollow star — same as the unstarred state in StarOverlay
             self._star_overlay_lbl.setText("☆")
@@ -2061,6 +2061,7 @@ class FullscreenViewer(QtWidgets.QWidget):
         R — Move the current image to  <open_folder>/00_removed/  then
         remove it from the thumbnail list immediately.
         Navigates to the next image (or previous if at the end).
+        Stays in fullscreen; no disruptive popup on success.
         """
         item = self._list.item(self._row)
         if item is None:
@@ -2069,23 +2070,22 @@ class FullscreenViewer(QtWidgets.QWidget):
         if not path or not os.path.isfile(path):
             return
 
-        # Determine the root folder from the main ImageOrganizer
-        # We find it by walking up from the file path one level
         root_folder = os.path.dirname(path)
         dest_dir    = os.path.join(root_folder, "00_removed")
 
         try:
             os.makedirs(dest_dir, exist_ok=True)
         except Exception as e:
-            QtWidgets.QMessageBox.critical(
-                self, "Error",
-                f"Could not create folder:\n{dest_dir}\n\n{e}")
+            # Show error but keep fullscreen open (parent=self keeps it on top)
+            QtWidgets.QMessageBox(
+                QtWidgets.QMessageBox.Critical, "Error",
+                f"Could not create folder:\n{dest_dir}\n\n{e}",
+                QtWidgets.QMessageBox.Ok, self).exec_()
             return
 
         fname    = os.path.basename(path)
         dst_path = os.path.join(dest_dir, fname)
 
-        # If a file with the same name already exists in 00_removed, suffix it
         if os.path.exists(dst_path):
             base, ext = os.path.splitext(fname)
             import time
@@ -2095,13 +2095,14 @@ class FullscreenViewer(QtWidgets.QWidget):
             import shutil
             shutil.move(path, dst_path)
         except Exception as e:
-            QtWidgets.QMessageBox.critical(
-                self, "Error",
-                f"Could not move file:\n{path}\n→ {dst_path}\n\n{e}")
+            QtWidgets.QMessageBox(
+                QtWidgets.QMessageBox.Critical, "Error",
+                f"Could not move file:\n{path}\n→ {dst_path}\n\n{e}",
+                QtWidgets.QMessageBox.Ok, self).exec_()
             return
 
-        # Remove from the list widget + clean up overlays
-        row = self._row
+        # Remove from list + clean up overlays
+        row  = self._row
         star = self._list._star_overlays.pop(row, None)
         if star:
             star.hide(); star.deleteLater()
@@ -2113,17 +2114,18 @@ class FullscreenViewer(QtWidgets.QWidget):
         self._list._rebuild_tag_index()
         QTimer.singleShot(50, self._list._reposition_overlays)
 
-        # Update total count and navigate
+        # Update total and navigate — stay in fullscreen
         self._total = self._list.count()
         if self._total == 0:
             self.close()
             return
 
-        # Stay at same row (now the next image) or step back at end
         if self._row >= self._total:
             self._row = self._total - 1
         self.row_changed.emit(self._row)
         self._update_display()
+        self.raise_()           # keep fullscreen on top
+        self.activateWindow()
 
     def _open_tag_dialog(self):
         item = self._list.item(self._row)
@@ -2836,17 +2838,24 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         """
         Catch F pressed anywhere in the main window — unless focus is inside
         a text input (QLineEdit / QSpinBox) where F is a normal character.
+        If the fullscreen viewer is already open, F closes it instead.
         """
         if event.key() == Qt.Key_F:
             focused = QtWidgets.QApplication.focusWidget()
             if not isinstance(focused, (QtWidgets.QLineEdit, QtWidgets.QSpinBox,
                                         QtWidgets.QAbstractSpinBox)):
-                # Open fullscreen at the current/selected row
-                row = self.list.currentRow()
-                if row < 0 and self.list.count() > 0:
-                    row = 0
-                if row >= 0:
-                    self._open_fullscreen(row)
+                # Toggle: close if open, open if closed
+                if hasattr(self, '_viewer') and self._viewer is not None:
+                    try:
+                        self._viewer.close()
+                    except RuntimeError:
+                        self._viewer = None
+                else:
+                    row = self.list.currentRow()
+                    if row < 0 and self.list.count() > 0:
+                        row = 0
+                    if row >= 0:
+                        self._open_fullscreen(row)
                 event.accept()
                 return
         super().keyPressEvent(event)
@@ -2931,25 +2940,69 @@ class ImageOrganizer(QtWidgets.QMainWindow):
     # ── Fullscreen viewer ─────────────────────────────────────────────────────
 
     def _open_fullscreen(self, start_row: int):
-        """Open the fullscreen gallery viewer at *start_row*."""
+        """
+        Open (or reuse) the fullscreen gallery viewer at *start_row*.
+
+        Only one fullscreen window exists at a time.  If one is already open,
+        navigate it to *start_row* and bring it to front instead of opening
+        a second window.  Pressing F when the viewer is already showing will
+        close it (handled in keyPressEvent via _close_fullscreen_if_open).
+        """
         if self.list.count() == 0:
             return
+
+        # Reuse existing viewer if already open
+        if hasattr(self, '_viewer') and self._viewer is not None:
+            try:
+                self._viewer._row = start_row
+                self._viewer._update_display()
+                self._viewer.raise_()
+                self._viewer.activateWindow()
+                return
+            except RuntimeError:
+                self._viewer = None   # viewer was deleted
+
         viewer = FullscreenViewer(self.list, start_row, parent=None)
         viewer.row_changed.connect(self._on_fullscreen_row_changed)
         viewer.star_changed.connect(self._on_fullscreen_star_changed)
         viewer.tag_changed.connect(self._on_fullscreen_tag_changed)
         viewer.setAttribute(Qt.WA_DeleteOnClose, True)
+        viewer.destroyed.connect(self._on_fullscreen_closed)
+        self._viewer = viewer
         viewer.showFullScreen()
         viewer.setFocus()
 
+    def _on_fullscreen_closed(self):
+        """Called when the fullscreen viewer is destroyed."""
+        self._viewer = None
+
+    def _close_fullscreen_if_open(self):
+        """Close the fullscreen viewer if it is currently open."""
+        if hasattr(self, '_viewer') and self._viewer is not None:
+            try:
+                self._viewer.close()
+            except RuntimeError:
+                pass
+            self._viewer = None
+
     def _on_fullscreen_row_changed(self, row: int):
-        """Keep the thumbnail grid in sync with fullscreen navigation."""
+        """Keep the thumbnail grid and normal preview in sync with fullscreen navigation."""
         if 0 <= row < self.list.count():
             self.list.clearSelection()
             item = self.list.item(row)
             if item:
                 item.setSelected(True)
+                self.list.setCurrentRow(row)
                 self.list.scrollToItem(item, QAbstractItemView.PositionAtCenter)
+                # Also update the normal preview panel
+                path = item.data(Qt.UserRole)
+                if path and os.path.exists(path):
+                    pix = QtGui.QPixmap(path)
+                    if not pix.isNull():
+                        scaled = pix.scaled(
+                            self.preview.size() - QtCore.QSize(20, 20),
+                            Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                        self.preview.setPixmap(scaled)
 
     def _on_fullscreen_star_changed(self, row: int, starred: bool):
         """Star overlay in main grid already updated by FullscreenViewer; emit scene banner refresh."""
