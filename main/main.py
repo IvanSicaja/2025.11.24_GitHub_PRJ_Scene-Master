@@ -2500,28 +2500,37 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         inner_layout.addWidget(export_sep)
         inner_layout.addSpacing(6)
 
-        export_fav_btn = QtWidgets.QPushButton("⭐  Export Favorites to Subfolder")
+        export_info_lbl = QtWidgets.QLabel(
+            "Copies all ★ starred images into  <b>00_favorites/</b>  inside the open folder.<br>"
+            "<span style='color:#555560;'>If the folder already exists, its contents are "
+            "cleared and replaced with the current favorites.</span>")
+        export_info_lbl.setTextFormat(Qt.RichText)
+        export_info_lbl.setWordWrap(True)
+        export_info_lbl.setStyleSheet(
+            "color: #7a7a82; font-size: 10px; background: transparent; border: none;")
+        inner_layout.addWidget(export_info_lbl)
+        inner_layout.addSpacing(5)
+
+        export_fav_btn = QtWidgets.QPushButton("★  Export Favorites")
         export_fav_btn.setToolTip(
-            "Copies all ★-starred images into a subfolder called '00_favorites'\n"
-            "inside the currently open folder. Original files are not moved or renamed.")
+            "Copies all starred (★) images into '00_favorites/' inside the open folder.\n"
+            "If the folder already exists, it is cleared first and rebuilt from scratch.")
         export_fav_btn.setStyleSheet("""
             QPushButton {
-                padding: 6px 10px; font-weight: 700; font-size: 12px;
+                padding: 6px 12px; font-weight: 700; font-size: 12px;
                 border-radius: 6px; margin: 1px 0;
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                            stop:0 #3a2a00, stop:1 #4a3800);
-                color: #ffd60a;
+                background: #111113;
+                color: #c8980a;
                 border: 1px solid #665500;
             }
             QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                            stop:0 #5a4000, stop:1 #6e5200);
-                border: 1px solid #998800;
-                color: #ffe566;
+                background: #1a1800;
+                border: 1px solid #c8980a;
+                color: #ffd60a;
             }
             QPushButton:pressed {
-                background: #2a1e00;
-                color: #ffd60a;
+                background: #0a0a0c;
+                color: #b88000;
             }
         """)
         export_fav_btn.setFixedHeight(34)
@@ -3501,17 +3510,17 @@ class ImageOrganizer(QtWidgets.QMainWindow):
 
     def export_favorites(self):
         """
-        Copy every ★-starred image in the current list into a subfolder named
-        '00_favorites' inside the open folder.  Originals are never moved or
-        modified — only copied.  If a file with the same name already exists
-        in the destination it is silently skipped (no overwrite).
+        Export all ★-starred images to  <open_folder>/00_favorites/.
+        If the destination folder already exists it is cleared first, then
+        all currently starred images are copied fresh.  Originals are never
+        moved or modified.
         """
         if not self.folder:
             QtWidgets.QMessageBox.warning(
                 self, "No Folder", "Please open a folder first.")
             return
 
-        # Collect starred paths from the list widget
+        # Collect starred paths
         starred_paths = []
         for i in range(self.list.count()):
             item = self.list.item(i)
@@ -3527,11 +3536,55 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.information(
                 self, "No Favorites",
                 "No images are marked as favorites (★) in the current list.\n\n"
-                "Click the star overlay on a thumbnail, or select a thumbnail "
-                "and press S, to mark it.")
+                "Select a thumbnail and press S, or click its ★ overlay, to star it.")
             return
 
-        dest_folder = os.path.join(self.folder, "00_favorites")
+        dest_folder  = os.path.join(self.folder, "00_favorites")
+        folder_exists = os.path.isdir(dest_folder)
+
+        # Build confirmation message
+        if folder_exists:
+            existing_count = len([
+                f for f in os.listdir(dest_folder)
+                if os.path.splitext(f)[1].lower() in {
+                    ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp", ".tif"}
+            ])
+            confirm_msg = (
+                f"Export {len(starred_paths)} starred image"
+                f"{'s' if len(starred_paths) != 1 else ''} to:\n\n"
+                f"  {dest_folder}\n\n"
+                f"⚠  This folder already exists and contains {existing_count} image"
+                f"{'s' if existing_count != 1 else ''}.\n"
+                "All existing images in it will be deleted and replaced with the current favorites.\n\n"
+                "Originals in the main folder are not affected. Continue?"
+            )
+        else:
+            confirm_msg = (
+                f"Export {len(starred_paths)} starred image"
+                f"{'s' if len(starred_paths) != 1 else ''} to:\n\n"
+                f"  {dest_folder}\n\n"
+                "Originals will not be moved or changed. Continue?"
+            )
+
+        reply = QtWidgets.QMessageBox.question(
+            self, "Export Favorites", confirm_msg,
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+        if reply != QtWidgets.QMessageBox.Yes:
+            return
+
+        import shutil
+
+        # Clear destination folder if it already exists
+        if folder_exists:
+            try:
+                shutil.rmtree(dest_folder)
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(
+                    self, "Error",
+                    f"Could not clear existing folder:\n{dest_folder}\n\n{e}")
+                return
+
+        # Create fresh destination folder
         try:
             os.makedirs(dest_folder, exist_ok=True)
         except Exception as e:
@@ -3540,40 +3593,21 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                 f"Could not create destination folder:\n{dest_folder}\n\n{e}")
             return
 
-        # Confirm
-        reply = QtWidgets.QMessageBox.question(
-            self, "Export Favorites",
-            f"Copy {len(starred_paths)} starred image"
-            f"{'s' if len(starred_paths) != 1 else ''} into:\n\n"
-            f"  {dest_folder}\n\n"
-            "Originals will not be moved or changed. Continue?",
-            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
-        if reply != QtWidgets.QMessageBox.Yes:
-            return
-
-        import shutil
-        copied  = 0
-        skipped = 0
-        errors  = []
+        # Copy all starred images
+        copied = 0
+        errors = []
 
         for src_path in starred_paths:
             fname    = os.path.basename(src_path)
             dst_path = os.path.join(dest_folder, fname)
-            if os.path.exists(dst_path):
-                skipped += 1
-                continue
             try:
-                shutil.copy2(src_path, dst_path)   # copy2 preserves EXIF/metadata
+                shutil.copy2(src_path, dst_path)   # preserves EXIF/metadata
                 copied += 1
             except Exception as e:
                 errors.append(f"{fname}: {e}")
 
-        # Build result message
-        parts = []
-        if copied:
-            parts.append(f"✓  {copied} image{'s' if copied != 1 else ''} copied.")
-        if skipped:
-            parts.append(f"⏭  {skipped} skipped (already existed).")
+        # Result summary
+        parts = [f"✓  {copied} image{'s' if copied != 1 else ''} exported."]
         if errors:
             parts.append(f"✗  {len(errors)} error{'s' if len(errors) != 1 else ''}:\n"
                          + "\n".join(errors[:5])
