@@ -1451,6 +1451,26 @@ class DragDropListWidget(QtWidgets.QListWidget):
                         star.set_starred(False)
             event.accept()
             return
+        # G key: unstar ALL selected regardless of current star state
+        if event.key() == Qt.Key_G:
+            for item in self.selectedItems():
+                row  = self.row(item)
+                star = self._star_overlays.get(row)
+                if star and star._supported:
+                    if set_image_rating(star._path, 0):
+                        star.set_starred(False)
+            event.accept()
+            return
+        # T key: open tag dialog for the focused/selected thumbnail
+        if event.key() == Qt.Key_T:
+            sel = self.selectedItems()
+            row = self.row(sel[0]) if sel else self.currentRow()
+            if row >= 0:
+                tov = self._tag_overlays.get(row)
+                if tov and tov._supported:
+                    tov._open_tag_dialog()
+            event.accept()
+            return
         # F key: open fullscreen viewer for current/selected image
         if event.key() == Qt.Key_F:
             sel = self.selectedItems()
