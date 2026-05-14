@@ -1670,8 +1670,9 @@ class FullscreenViewer(QtWidgets.QWidget):
     _STRIP_W   = 110
     _STRIP_H   = 80
     _STRIP_GAP = 10
-    _BAR_H     = 120
-    _BTN_H     = 32
+    _BAR_H     = 130
+    _BTN_H     = 28
+    _BTN_W     = 190
 
     def __init__(self, list_widget, start_row, parent=None):
         super().__init__(parent, Qt.Window | Qt.FramelessWindowHint)
@@ -1704,22 +1705,25 @@ class FullscreenViewer(QtWidgets.QWidget):
         # ── LEFT: 3 uniform action buttons ───────────────────────────────────
         left_widget = QtWidgets.QWidget()
         left_widget.setStyleSheet("background: transparent; border: none;")
-        left_widget.setFixedWidth(200)
+        left_widget.setFixedWidth(210)
         left_vbox = QtWidgets.QVBoxLayout(left_widget)
         left_vbox.setContentsMargins(0, 0, 0, 0)
-        left_vbox.setSpacing(8)
+        left_vbox.setSpacing(10)
         left_vbox.addStretch()
 
         self._star_btn = QtWidgets.QPushButton()
         self._star_btn.setFixedHeight(self._BTN_H)
+        self._star_btn.setFixedWidth(self._BTN_W)
         self._star_btn.clicked.connect(self._toggle_star)
 
         self._tag_btn = QtWidgets.QPushButton()
         self._tag_btn.setFixedHeight(self._BTN_H)
+        self._tag_btn.setFixedWidth(self._BTN_W)
         self._tag_btn.clicked.connect(self._open_tag_dialog)
 
         self._close_btn = QtWidgets.QPushButton("\u2715  Close  (F/Esc)")
         self._close_btn.setFixedHeight(self._BTN_H)
+        self._close_btn.setFixedWidth(self._BTN_W)
         self._close_btn.setStyleSheet("""
             QPushButton {
                 background: #2a1010; color: #ff5555;
@@ -2628,38 +2632,48 @@ class ImageOrganizer(QtWidgets.QMainWindow):
 
         # ── Colored keyboard hint bar (between scene banner and thumbnails) ───
         hint_bar = QtWidgets.QWidget()
-        hint_bar.setFixedHeight(22)
+        hint_bar.setFixedHeight(24)
         hint_bar.setStyleSheet(
-            "background: #0a0f14; border-bottom: 1px solid #1a2a3a;")
+            "background: #080d12; border-bottom: 1px solid #152030;")
         hint_bar_layout = QtWidgets.QHBoxLayout(hint_bar)
-        hint_bar_layout.setContentsMargins(12, 0, 12, 0)
+        hint_bar_layout.setContentsMargins(14, 0, 14, 0)
         hint_bar_layout.setSpacing(0)
 
         def _hint_lbl(text, color):
             lbl = QtWidgets.QLabel(text)
             lbl.setStyleSheet(
                 f"color: {color}; font-size: 10px; font-weight: 600; "
-                "background: transparent; border: none;")
+                "background: transparent; border: none; letter-spacing: 0.2px;")
             return lbl
 
         def _sep():
-            s = QtWidgets.QLabel("  ·  ")
-            s.setStyleSheet(
-                "color: #1e2e3e; font-size: 10px; "
-                "background: transparent; border: none;")
+            s = QtWidgets.QLabel("    ")
+            s.setStyleSheet("background: transparent; border: none;")
             return s
 
-        hint_bar_layout.addWidget(_hint_lbl("S  Add Star", "#b88000"))
+        # ★  Add Star — (S)
+        hint_bar_layout.addWidget(_hint_lbl("★", "#c8980a"))
+        hint_bar_layout.addWidget(_hint_lbl(" Add Star — (S)", "#8a7030"))
         hint_bar_layout.addWidget(_sep())
-        hint_bar_layout.addWidget(_hint_lbl("D  Remove Star", "#444450"))
+        # ☆  Remove Star — (D)
+        hint_bar_layout.addWidget(_hint_lbl("☆", "#505058"))
+        hint_bar_layout.addWidget(_hint_lbl(" Remove Star — (D)", "#404048"))
         hint_bar_layout.addWidget(_sep())
-        hint_bar_layout.addWidget(_hint_lbl("T  Tag", "#1a6a9a"))
+        # 🏷  Add Tag — (T)
+        hint_bar_layout.addWidget(_hint_lbl("🏷", "#1a7aaa"))
+        hint_bar_layout.addWidget(_hint_lbl(" Add Tag — (T)", "#1a5a80"))
         hint_bar_layout.addWidget(_sep())
-        hint_bar_layout.addWidget(_hint_lbl("F  Fullscreen", "#206040"))
+        # ⛶  Fullscreen — (F)
+        hint_bar_layout.addWidget(_hint_lbl("⛶", "#208050"))
+        hint_bar_layout.addWidget(_hint_lbl(" Fullscreen — (F)", "#186040"))
         hint_bar_layout.addWidget(_sep())
-        hint_bar_layout.addWidget(_hint_lbl("B / Right-click  Base Name", "#2a3a2a"))
+        # ✎  Base Name — (B / Right-click)
+        hint_bar_layout.addWidget(_hint_lbl("✎", "#2a6a5a"))
+        hint_bar_layout.addWidget(_hint_lbl(" Base Name — (B / Right-click)", "#1e4a40"))
         hint_bar_layout.addWidget(_sep())
-        hint_bar_layout.addWidget(_hint_lbl("← →  Navigate", "#252535"))
+        # ◀ ▶  Navigate
+        hint_bar_layout.addWidget(_hint_lbl("◀ ▶", "#304060"))
+        hint_bar_layout.addWidget(_hint_lbl(" Navigate", "#253050"))
         hint_bar_layout.addStretch()
 
         # Right-side container: scene banner → hint bar → thumbnail list
