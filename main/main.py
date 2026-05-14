@@ -1689,6 +1689,13 @@ class FullscreenViewer(QtWidgets.QWidget):
         self._img_label.setAlignment(Qt.AlignCenter)
         self._img_label.setStyleSheet("background: #000000; border: none;")
 
+        # Star overlay — top-right corner of the image area, 40% opacity
+        self._star_overlay_lbl = QtWidgets.QLabel(self)
+        self._star_overlay_lbl.setAlignment(Qt.AlignCenter)
+        self._star_overlay_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self._star_overlay_lbl.setStyleSheet(
+            "background: transparent; border: none; font-size: 26px;")
+
         self._bar = QtWidgets.QWidget(self)
         self._bar.setStyleSheet("""
             QWidget {
@@ -1736,8 +1743,29 @@ class FullscreenViewer(QtWidgets.QWidget):
         """)
         self._close_btn.clicked.connect(self.close)
 
+        # Remove-to-folder button
+        self._remove_btn = QtWidgets.QPushButton("\U0001f5d1  Remove  (R)")
+        self._remove_btn.setFixedHeight(self._BTN_H)
+        self._remove_btn.setFixedWidth(self._BTN_W)
+        self._remove_btn.setToolTip(
+            "Move this image to  00_removed/  inside the open folder.\n"
+            "The image is removed from the list immediately.")
+        self._remove_btn.setStyleSheet("""
+            QPushButton {
+                background: #1c1010; color: #886060;
+                border: 1px solid #4a2020;
+                border-radius: 6px; font-size: 11px; font-weight: 600;
+                padding: 4px 10px;
+            }
+            QPushButton:hover   { background: #2a1515; color: #cc8888;
+                                   border-color: #884040; }
+            QPushButton:pressed { background: #140c0c; }
+        """)
+        self._remove_btn.clicked.connect(self._remove_image)
+
         left_vbox.addWidget(self._star_btn)
         left_vbox.addWidget(self._tag_btn)
+        left_vbox.addWidget(self._remove_btn)
         left_vbox.addWidget(self._close_btn)
         left_vbox.addStretch()
 
@@ -1808,6 +1836,7 @@ class FullscreenViewer(QtWidgets.QWidget):
         if screen:
             self.setGeometry(screen.geometry())
         self._layout_children()
+        self._star_overlay_lbl.raise_()
         self._update_display()
 
     def resizeEvent(self, event):
@@ -1819,6 +1848,8 @@ class FullscreenViewer(QtWidgets.QWidget):
         h = self.height()
         self._bar.setGeometry(0, h - self._BAR_H, w, self._BAR_H)
         self._img_label.setGeometry(0, 0, w, h - self._BAR_H)
+        # Star overlay: top-right corner of image area, 48×48
+        self._star_overlay_lbl.setGeometry(w - 58, 14, 44, 44)
 
     # ── navigation ────────────────────────────────────────────────────────────
 
@@ -1887,7 +1918,7 @@ class FullscreenViewer(QtWidgets.QWidget):
         bh = self._BTN_H
         is_starred = self._get_current_starred(path)
         if is_starred:
-            self._star_btn.setText("\u2605  Remove Star  (S)")
+            self._star_btn.setText("\u2605  Starred  (S)")
             self._star_btn.setStyleSheet(f"""
                 QPushButton {{
                     background: #2a2000; color: #ffd60a; border: 1px solid #ffd60a;
@@ -1936,6 +1967,21 @@ class FullscreenViewer(QtWidgets.QWidget):
                 QPushButton:pressed {{ background: #061422; }}
             """)
 
+        # Star overlay top-right (mirrors StarOverlay from normal mode, 40% opacity)
+        is_starred_for_overlay = self._get_current_starred(path)
+        if is_starred_for_overlay:
+            # Solid gold star at 40% opacity via rgba background trick
+            self._star_overlay_lbl.setText("★")
+            self._star_overlay_lbl.setStyleSheet(
+                "background: transparent; border: none; font-size: 26px; "
+                "color: rgba(255, 204, 0, 102);")   # 102/255 ≈ 40%
+        else:
+            # Faint white hollow star — same as the unstarred state in StarOverlay
+            self._star_overlay_lbl.setText("☆")
+            self._star_overlay_lbl.setStyleSheet(
+                "background: transparent; border: none; font-size: 26px; "
+                "color: rgba(255, 255, 255, 40);")   # very faint
+
         # Film-strip
         for idx, cell in enumerate(self._strip_cells):
             offset    = idx - 2
@@ -1977,20 +2023,20 @@ class FullscreenViewer(QtWidgets.QWidget):
     # ── actions ───────────────────────────────────────────────────────────────
 
     def _toggle_star(self):
-        """R — toggle: add star if unstarred, remove if starred."""
+        """S — add 5-star rating only (never removes; use D to remove)."""
         item = self._list.item(self._row)
         if item is None:
             return
         path = item.data(Qt.UserRole) or ""
         if os.path.splitext(path)[1].lower() not in XMP_SUPPORTED_EXT:
             return
-        is_starred = self._get_current_starred(path)
-        new_rating = 0 if is_starred else 5
-        if set_image_rating(path, new_rating):
+        if self._get_current_starred(path):
+            return  # S only adds, never removes
+        if set_image_rating(path, 5):
             star = self._list._star_overlays.get(self._row)
             if star:
-                star.set_starred(new_rating == 5)
-            self.star_changed.emit(self._row, new_rating == 5)
+                star.set_starred(True)
+            self.star_changed.emit(self._row, True)
             self._update_display()
 
     def _do_unstar(self):
@@ -2009,6 +2055,75 @@ class FullscreenViewer(QtWidgets.QWidget):
                 star.set_starred(False)
             self.star_changed.emit(self._row, False)
             self._update_display()
+
+    def _remove_image(self):
+        """
+        R — Move the current image to  <open_folder>/00_removed/  then
+        remove it from the thumbnail list immediately.
+        Navigates to the next image (or previous if at the end).
+        """
+        item = self._list.item(self._row)
+        if item is None:
+            return
+        path = item.data(Qt.UserRole) or ""
+        if not path or not os.path.isfile(path):
+            return
+
+        # Determine the root folder from the main ImageOrganizer
+        # We find it by walking up from the file path one level
+        root_folder = os.path.dirname(path)
+        dest_dir    = os.path.join(root_folder, "00_removed")
+
+        try:
+            os.makedirs(dest_dir, exist_ok=True)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self, "Error",
+                f"Could not create folder:\n{dest_dir}\n\n{e}")
+            return
+
+        fname    = os.path.basename(path)
+        dst_path = os.path.join(dest_dir, fname)
+
+        # If a file with the same name already exists in 00_removed, suffix it
+        if os.path.exists(dst_path):
+            base, ext = os.path.splitext(fname)
+            import time
+            dst_path = os.path.join(dest_dir, f"{base}_{int(time.time())}{ext}")
+
+        try:
+            import shutil
+            shutil.move(path, dst_path)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self, "Error",
+                f"Could not move file:\n{path}\n→ {dst_path}\n\n{e}")
+            return
+
+        # Remove from the list widget + clean up overlays
+        row = self._row
+        star = self._list._star_overlays.pop(row, None)
+        if star:
+            star.hide(); star.deleteLater()
+        tov = self._list._tag_overlays.pop(row, None)
+        if tov:
+            tov.hide(); tov.deleteLater()
+        self._list.takeItem(row)
+        self._list._rebuild_star_index()
+        self._list._rebuild_tag_index()
+        QTimer.singleShot(50, self._list._reposition_overlays)
+
+        # Update total count and navigate
+        self._total = self._list.count()
+        if self._total == 0:
+            self.close()
+            return
+
+        # Stay at same row (now the next image) or step back at end
+        if self._row >= self._total:
+            self._row = self._total - 1
+        self.row_changed.emit(self._row)
+        self._update_display()
 
     def _open_tag_dialog(self):
         item = self._list.item(self._row)
@@ -2088,6 +2203,8 @@ class FullscreenViewer(QtWidgets.QWidget):
             self._toggle_star()
         elif k == Qt.Key_D:
             self._do_unstar()
+        elif k == Qt.Key_R:
+            self._remove_image()
         elif k == Qt.Key_T:
             self._open_tag_dialog()
         elif k in (Qt.Key_F, Qt.Key_Escape):
