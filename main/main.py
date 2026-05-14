@@ -1652,31 +1652,40 @@ class DragDropListWidget(QtWidgets.QListWidget):
 # ──────────────────────────────────────────────────────────────────────────────
 
 class FullscreenViewer(QtWidgets.QWidget):
-    """Fullscreen gallery viewer with film-strip, ratings and tag editing."""
+    """
+    Fullscreen gallery viewer.
 
-    # Signals emitted back to ImageOrganizer so overlays stay in sync
-    star_changed  = QtCore.pyqtSignal(int, bool)   # (row, starred)
-    tag_changed   = QtCore.pyqtSignal(int, str)    # (row, tag_text)
-    row_changed   = QtCore.pyqtSignal(int)         # current row changed
+    Layout of the bottom bar:
+      LEFT  — action buttons (Star/Unstar, Tag, Close) + live star/tag status
+      CENTER — film-strip (5 cells)
+      RIGHT  — filename + counter
 
-    _STRIP_W    = 110   # film-strip thumbnail width
-    _STRIP_H    = 80    # film-strip thumbnail height
-    _STRIP_GAP  = 10
-    _BAR_H      = 110   # total height of the bottom bar
+    Keys:  ← → ↑ ↓  navigate    R  add 5-star    D  remove star
+           T  tag dialog    F / Esc  close
+    """
+
+    star_changed = QtCore.pyqtSignal(int, bool)   # (row, starred)
+    tag_changed  = QtCore.pyqtSignal(int, str)    # (row, tag_text)
+    row_changed  = QtCore.pyqtSignal(int)
+
+    _STRIP_W   = 110
+    _STRIP_H   = 80
+    _STRIP_GAP = 10
+    _BAR_H     = 120
 
     def __init__(self, list_widget: 'DragDropListWidget', start_row: int,
                  parent=None):
         super().__init__(parent, Qt.Window | Qt.FramelessWindowHint)
-        self._list      = list_widget
-        self._row       = start_row
-        self._total     = list_widget.count()
+        self._list  = list_widget
+        self._row   = start_row
+        self._total = list_widget.count()
         self._thumb_cache: dict[int, QtGui.QPixmap] = {}
 
         self.setWindowTitle("Scenify — Fullscreen")
         self.setStyleSheet("background: #000000;")
         self.setFocusPolicy(Qt.StrongFocus)
 
-        # ── Main image label ──────────────────────────────────────────────────
+        # ── Main image ────────────────────────────────────────────────────────
         self._img_label = QtWidgets.QLabel(self)
         self._img_label.setAlignment(Qt.AlignCenter)
         self._img_label.setStyleSheet("background: #000000; border: none;")
@@ -1686,47 +1695,74 @@ class FullscreenViewer(QtWidgets.QWidget):
         self._bar.setStyleSheet("""
             QWidget {
                 background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
-                    stop:0 #0a0a0a, stop:1 #141416);
-                border-top: 1px solid #2a2a2c;
+                    stop:0 #080808, stop:1 #111113);
+                border-top: 1px solid #222224;
             }
         """)
+
         bar_layout = QtWidgets.QHBoxLayout(self._bar)
-        bar_layout.setContentsMargins(20, 10, 20, 10)
-        bar_layout.setSpacing(self._STRIP_GAP)
+        bar_layout.setContentsMargins(18, 8, 18, 8)
+        bar_layout.setSpacing(16)
 
-        # Left side: info labels
-        info_widget = QtWidgets.QWidget()
-        info_widget.setStyleSheet("background: transparent; border: none;")
-        info_layout = QtWidgets.QVBoxLayout(info_widget)
-        info_layout.setContentsMargins(0, 0, 0, 0)
-        info_layout.setSpacing(2)
+        # ── LEFT: action buttons + live status ───────────────────────────────
+        left_widget = QtWidgets.QWidget()
+        left_widget.setStyleSheet("background: transparent; border: none;")
+        left_widget.setFixedWidth(220)
+        left_vbox = QtWidgets.QVBoxLayout(left_widget)
+        left_vbox.setContentsMargins(0, 0, 0, 0)
+        left_vbox.setSpacing(5)
 
-        self._name_label = QtWidgets.QLabel()
-        self._name_label.setStyleSheet(
-            "color: #e0e0e0; font-size: 13px; font-weight: 600; "
-            "background: transparent; border: none;")
+        # Star button — style changes based on state
+        self._star_btn = QtWidgets.QPushButton()
+        self._star_btn.setFixedHeight(30)
+        self._star_btn.clicked.connect(self._do_star)
 
-        self._meta_label = QtWidgets.QLabel()
-        self._meta_label.setStyleSheet(
-            "color: #636366; font-size: 11px; background: transparent; border: none;")
+        # Unstar button
+        self._unstar_btn = QtWidgets.QPushButton("☆  Remove Star  (D)")
+        self._unstar_btn.setFixedHeight(30)
+        self._unstar_btn.setStyleSheet("""
+            QPushButton {
+                background: #1a1a1c; color: #555558; border: 1px solid #2a2a2c;
+                border-radius: 6px; font-size: 11px; font-weight: 600;
+                padding: 4px 10px;
+            }
+            QPushButton:hover  { background: #2a1a1a; color: #ff6b6b;
+                                  border-color: #7a2020; }
+            QPushButton:pressed { background: #180d0d; }
+        """)
+        self._unstar_btn.clicked.connect(self._do_unstar)
 
-        self._tag_label = QtWidgets.QLabel()
-        self._tag_label.setStyleSheet(
-            "color: #32ade6; font-size: 11px; font-weight: 600; "
-            "background: transparent; border: none;")
+        # Tag button
+        self._tag_btn = QtWidgets.QPushButton()
+        self._tag_btn.setFixedHeight(30)
+        self._tag_btn.clicked.connect(self._open_tag_dialog)
 
-        info_layout.addWidget(self._name_label)
-        info_layout.addWidget(self._meta_label)
-        info_layout.addWidget(self._tag_label)
-        info_layout.addStretch()
+        # Close button
+        close_btn = QtWidgets.QPushButton("✕  Close  (F)")
+        close_btn.setFixedHeight(28)
+        close_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent; color: #444448; border: none;
+                font-size: 10px; font-weight: 600; padding: 2px 6px;
+                text-align: left;
+            }
+            QPushButton:hover  { color: #ff6b6b; }
+        """)
+        close_btn.clicked.connect(self.close)
 
         # Keyboard hint
-        hint = QtWidgets.QLabel(
-            "← →  Navigate    R  Star    D  Unstar    T  Tag    F  Close")
-        hint.setStyleSheet(
-            "color: #3a3a4a; font-size: 10px; background: transparent; border: none;")
+        hint_lbl = QtWidgets.QLabel("← →  Navigate    T  Tag    F  Close")
+        hint_lbl.setStyleSheet(
+            "color: #2a2a38; font-size: 9px; background: transparent; border: none;")
 
-        # Film-strip: 5 clickable thumbnail cells
+        left_vbox.addWidget(self._star_btn)
+        left_vbox.addWidget(self._unstar_btn)
+        left_vbox.addWidget(self._tag_btn)
+        left_vbox.addWidget(close_btn)
+        left_vbox.addWidget(hint_lbl)
+        left_vbox.addStretch()
+
+        # ── CENTER: film-strip ────────────────────────────────────────────────
         self._strip_cells: list[QtWidgets.QLabel] = []
         strip_widget = QtWidgets.QWidget()
         strip_widget.setStyleSheet("background: transparent; border: none;")
@@ -1738,78 +1774,43 @@ class FullscreenViewer(QtWidgets.QWidget):
             cell = QtWidgets.QLabel()
             cell.setFixedSize(self._STRIP_W, self._STRIP_H)
             cell.setAlignment(Qt.AlignCenter)
-            cell.setStyleSheet("""
-                QLabel {
-                    background: #1a1a1c;
-                    border: 1px solid #2a2a2c;
-                    border-radius: 4px;
-                }
-            """)
-            offset = i - 2   # -2, -1, 0, +1, +2
+            offset = i - 2
             cell.mousePressEvent = lambda e, off=offset: self._strip_clicked(off)
             cell.setCursor(Qt.PointingHandCursor)
             self._strip_cells.append(cell)
             strip_hbox.addWidget(cell)
 
-        # Right action buttons
-        btn_style_star = """
-            QPushButton {
-                background: #2a2000; color: #ffd60a; border: 1px solid #665500;
-                border-radius: 6px; font-size: 12px; font-weight: 700;
-                padding: 6px 14px;
-            }
-            QPushButton:hover  { background: #3a3000; border-color: #998800; }
-            QPushButton:pressed { background: #1a1400; }
-        """
-        btn_style_tag = """
-            QPushButton {
-                background: #0d2233; color: #32ade6; border: 1px solid #1a5580;
-                border-radius: 6px; font-size: 12px; font-weight: 700;
-                padding: 6px 14px;
-            }
-            QPushButton:hover  { background: #1a3a5a; border-color: #2a80c0; }
-            QPushButton:pressed { background: #081522; }
-        """
-        btn_style_close = """
-            QPushButton {
-                background: #2a1a1a; color: #ff6b6b; border: 1px solid #7a2020;
-                border-radius: 6px; font-size: 12px; font-weight: 700;
-                padding: 6px 14px;
-            }
-            QPushButton:hover  { background: #3a1a1a; border-color: #cc3030; }
-            QPushButton:pressed { background: #1a0a0a; }
-        """
+        # ── RIGHT: image info ─────────────────────────────────────────────────
+        right_widget = QtWidgets.QWidget()
+        right_widget.setStyleSheet("background: transparent; border: none;")
+        right_widget.setFixedWidth(220)
+        right_vbox = QtWidgets.QVBoxLayout(right_widget)
+        right_vbox.setContentsMargins(0, 0, 0, 0)
+        right_vbox.setSpacing(3)
+        right_vbox.addStretch()
 
-        self._star_btn = QtWidgets.QPushButton("★  Star  (R)")
-        self._star_btn.setStyleSheet(btn_style_star)
-        self._star_btn.setFixedHeight(34)
-        self._star_btn.clicked.connect(self._toggle_star)
+        self._name_label = QtWidgets.QLabel()
+        self._name_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self._name_label.setStyleSheet(
+            "color: #c0c0c0; font-size: 12px; font-weight: 600; "
+            "background: transparent; border: none;")
+        self._name_label.setWordWrap(True)
 
-        tag_btn = QtWidgets.QPushButton("🏷  Tag  (T)")
-        tag_btn.setStyleSheet(btn_style_tag)
-        tag_btn.setFixedHeight(34)
-        tag_btn.clicked.connect(self._open_tag_dialog)
+        self._meta_label = QtWidgets.QLabel()
+        self._meta_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self._meta_label.setStyleSheet(
+            "color: #444448; font-size: 11px; background: transparent; border: none;")
 
-        close_btn = QtWidgets.QPushButton("✕  Close  (F)")
-        close_btn.setStyleSheet(btn_style_close)
-        close_btn.setFixedHeight(34)
-        close_btn.clicked.connect(self.close)
+        right_vbox.addWidget(self._name_label)
+        right_vbox.addWidget(self._meta_label)
+        right_vbox.addStretch()
 
-        actions_widget = QtWidgets.QWidget()
-        actions_widget.setStyleSheet("background: transparent; border: none;")
-        actions_vbox = QtWidgets.QVBoxLayout(actions_widget)
-        actions_vbox.setContentsMargins(0, 0, 0, 0)
-        actions_vbox.setSpacing(6)
-        actions_vbox.addWidget(self._star_btn)
-        actions_vbox.addWidget(tag_btn)
-        actions_vbox.addWidget(close_btn)
-
-        bar_layout.addWidget(info_widget)
-        bar_layout.addWidget(hint, 0, Qt.AlignBottom)
+        # ── Assemble bar ──────────────────────────────────────────────────────
+        bar_layout.addWidget(left_widget, 0, Qt.AlignVCenter)
         bar_layout.addStretch(1)
         bar_layout.addWidget(strip_widget, 0, Qt.AlignVCenter)
         bar_layout.addStretch(1)
-        bar_layout.addWidget(actions_widget, 0, Qt.AlignVCenter)
+        bar_layout.addWidget(right_widget, 0, Qt.AlignVCenter)
 
         self._update_display()
 
@@ -1869,55 +1870,83 @@ class FullscreenViewer(QtWidgets.QWidget):
                                         Qt.SmoothTransformation)
                     self._img_label.setPixmap(scaled)
 
-        # Info labels
+        # Filename + counter (right side)
         self._name_label.setText(os.path.basename(path))
-        self._meta_label.setText(f"Image {self._row + 1} of {self._total}")
+        self._meta_label.setText(f"{self._row + 1}  /  {self._total}")
 
-        tag_text = get_image_tag(path)
-        self._tag_label.setText(f"🏷  {tag_text}" if tag_text else "")
-
-        # Star button label
+        # Star button (left side) — reflects current state
         is_starred = (get_image_rating(path) == 5)
-        self._star_btn.setText(
-            "★  Unstar  (R)" if is_starred else "★  Star  (R)"
-        )
-        starred_style = """
-            QPushButton {
-                background: #2a2000; color: #ffd60a; border: 1px solid #ffd60a;
-                border-radius: 6px; font-size: 12px; font-weight: 700;
-                padding: 6px 14px;
-            }
-            QPushButton:hover  { background: #3a3000; }
-        """ if is_starred else """
-            QPushButton {
-                background: #1a1a1c; color: #888888; border: 1px solid #3a3a3c;
-                border-radius: 6px; font-size: 12px; font-weight: 700;
-                padding: 6px 14px;
-            }
-            QPushButton:hover  { background: #2a2a2c; color: #ffd60a; }
-        """
-        self._star_btn.setStyleSheet(starred_style)
+        if is_starred:
+            self._star_btn.setText("★  Starred  (R)")
+            self._star_btn.setStyleSheet("""
+                QPushButton {
+                    background: #2a2000; color: #ffd60a;
+                    border: 1px solid #ffd60a;
+                    border-radius: 6px; font-size: 11px; font-weight: 700;
+                    padding: 4px 10px;
+                }
+                QPushButton:hover  { background: #3a3000; }
+                QPushButton:pressed { background: #1a1400; }
+            """)
+        else:
+            self._star_btn.setText("☆  Add Star  (R)")
+            self._star_btn.setStyleSheet("""
+                QPushButton {
+                    background: #1a1a1c; color: #666668;
+                    border: 1px solid #2e2e30;
+                    border-radius: 6px; font-size: 11px; font-weight: 600;
+                    padding: 4px 10px;
+                }
+                QPushButton:hover  { background: #2a2000; color: #ffd60a;
+                                      border-color: #665500; }
+                QPushButton:pressed { background: #1a1400; }
+            """)
 
-        # Film-strip: positions -2, -1, 0, +1, +2
+        # Tag button (left side) — shows tag text if set
+        tag_text = get_image_tag(path)
+        if tag_text:
+            short = tag_text if len(tag_text) <= 22 else tag_text[:20] + "…"
+            self._tag_btn.setText(f"🏷  {short}  (T)")
+            self._tag_btn.setStyleSheet("""
+                QPushButton {
+                    background: #0a1e30; color: #32ade6;
+                    border: 1px solid #1a6090;
+                    border-radius: 6px; font-size: 11px; font-weight: 700;
+                    padding: 4px 10px;
+                }
+                QPushButton:hover  { background: #1a3a5a; border-color: #2a80c0; }
+                QPushButton:pressed { background: #061422; }
+            """)
+        else:
+            self._tag_btn.setText("🏷  Add Tag  (T)")
+            self._tag_btn.setStyleSheet("""
+                QPushButton {
+                    background: #1a1a1c; color: #444448;
+                    border: 1px solid #2a2a2c;
+                    border-radius: 6px; font-size: 11px; font-weight: 600;
+                    padding: 4px 10px;
+                }
+                QPushButton:hover  { background: #0a1e30; color: #32ade6;
+                                      border-color: #1a5580; }
+                QPushButton:pressed { background: #061422; }
+            """)
+
+        # Film-strip
         for idx, cell in enumerate(self._strip_cells):
-            offset   = idx - 2
-            row      = self._row + offset
+            offset    = idx - 2
+            row       = self._row + offset
             is_center = (offset == 0)
 
             if row < 0 or row >= self._total:
                 cell.setPixmap(QtGui.QPixmap())
                 cell.setText("")
                 cell.setStyleSheet("""
-                    QLabel {
-                        background: #0d0d0e;
-                        border: 1px solid #1a1a1c;
-                        border-radius: 4px;
-                    }
+                    QLabel { background: #0a0a0b; border: 1px solid #161618;
+                             border-radius: 4px; }
                 """)
                 cell.setCursor(Qt.ArrowCursor)
                 continue
 
-            # Thumbnail
             thumb = self._get_strip_thumb(row)
             if thumb:
                 cell.setPixmap(thumb)
@@ -1927,27 +1956,19 @@ class FullscreenViewer(QtWidgets.QWidget):
 
             if is_center:
                 cell.setStyleSheet("""
-                    QLabel {
-                        background: #0d2233;
-                        border: 2px solid #32ade6;
-                        border-radius: 6px;
-                    }
+                    QLabel { background: #0a1e30; border: 2px solid #32ade6;
+                             border-radius: 6px; }
                 """)
                 cell.setCursor(Qt.ArrowCursor)
             else:
                 cell.setStyleSheet("""
-                    QLabel {
-                        background: #1a1a1c;
-                        border: 1px solid #2a2a2c;
-                        border-radius: 4px;
-                    }
-                    QLabel:hover {
-                        border: 1px solid #3a3a5a;
-                    }
+                    QLabel { background: #161618; border: 1px solid #222224;
+                             border-radius: 4px; }
+                    QLabel:hover { border-color: #3a3a5a; }
                 """)
                 cell.setCursor(Qt.PointingHandCursor)
 
-    def _get_strip_thumb(self, row: int) -> QtGui.QPixmap | None:
+    def _get_strip_thumb(self, row: int):
         if row in self._thumb_cache:
             return self._thumb_cache[row]
         item = self._list.item(row)
@@ -1966,22 +1987,38 @@ class FullscreenViewer(QtWidgets.QWidget):
 
     # ── actions ───────────────────────────────────────────────────────────────
 
-    def _toggle_star(self):
+    def _do_star(self):
+        """R — add 5-star rating (only if not already starred)."""
         item = self._list.item(self._row)
         if item is None:
             return
-        path      = item.data(Qt.UserRole) or ""
-        ext       = os.path.splitext(path)[1].lower()
-        if ext not in XMP_SUPPORTED_EXT:
+        path = item.data(Qt.UserRole) or ""
+        if os.path.splitext(path)[1].lower() not in XMP_SUPPORTED_EXT:
             return
-        is_starred = (get_image_rating(path) == 5)
-        new_rating = 0 if is_starred else 5
-        if set_image_rating(path, new_rating):
-            # Sync back to main list overlay
+        if get_image_rating(path) == 5:
+            return   # already starred — R only adds, never removes
+        if set_image_rating(path, 5):
             star = self._list._star_overlays.get(self._row)
             if star:
-                star.set_starred(new_rating == 5)
-            self.star_changed.emit(self._row, new_rating == 5)
+                star.set_starred(True)
+            self.star_changed.emit(self._row, True)
+            self._update_display()
+
+    def _do_unstar(self):
+        """D — remove star rating."""
+        item = self._list.item(self._row)
+        if item is None:
+            return
+        path = item.data(Qt.UserRole) or ""
+        if os.path.splitext(path)[1].lower() not in XMP_SUPPORTED_EXT:
+            return
+        if get_image_rating(path) != 5:
+            return   # already unstarred
+        if set_image_rating(path, 0):
+            star = self._list._star_overlays.get(self._row)
+            if star:
+                star.set_starred(False)
+            self.star_changed.emit(self._row, False)
             self._update_display()
 
     def _open_tag_dialog(self):
@@ -1989,8 +2026,7 @@ class FullscreenViewer(QtWidgets.QWidget):
         if item is None:
             return
         path = item.data(Qt.UserRole) or ""
-        ext  = os.path.splitext(path)[1].lower()
-        if ext not in XMP_SUPPORTED_EXT:
+        if os.path.splitext(path)[1].lower() not in XMP_SUPPORTED_EXT:
             return
 
         dlg = QtWidgets.QDialog(self)
@@ -1998,7 +2034,8 @@ class FullscreenViewer(QtWidgets.QWidget):
         dlg.setMinimumWidth(400)
         dlg.setStyleSheet("""
             QDialog   { background: #1c1c1e; color: #e0e0e0; }
-            QLabel    { color: #a0a0a0; font-size: 11px; background: transparent; border: none; }
+            QLabel    { color: #a0a0a0; font-size: 11px;
+                        background: transparent; border: none; }
             QLineEdit {
                 background: #2c2c2e; border: 1px solid #3a3a3c;
                 border-radius: 6px; padding: 6px 10px; color: #e0e0e0;
@@ -2012,7 +2049,8 @@ class FullscreenViewer(QtWidgets.QWidget):
 
         header = QtWidgets.QLabel(
             f"<b style='color:#32ade6;font-size:13px;'>🏷  Scene Tag</b><br>"
-            f"<span style='color:#636366;font-size:10px;'>{os.path.basename(path)}</span>")
+            f"<span style='color:#636366;font-size:10px;'>"
+            f"{os.path.basename(path)}</span>")
         header.setTextFormat(Qt.RichText)
         layout.addWidget(header)
 
@@ -2022,8 +2060,8 @@ class FullscreenViewer(QtWidgets.QWidget):
         edit.setClearButtonEnabled(True)
         layout.addWidget(edit)
 
-        btn_row = QtWidgets.QHBoxLayout()
-        btn_row.setSpacing(8)
+        btn_row_layout = QtWidgets.QHBoxLayout()
+        btn_row_layout.setSpacing(8)
 
         cancel_btn = QtWidgets.QPushButton("Cancel")
         cancel_btn.setFixedHeight(30)
@@ -2037,7 +2075,8 @@ class FullscreenViewer(QtWidgets.QWidget):
         clear_btn.setFixedHeight(30)
         clear_btn.setStyleSheet(
             "QPushButton { background: #3a1a1a; color: #ff6b6b; "
-            "border: 1px solid #7a2020; border-radius: 6px; font-weight: 600; padding: 4px 18px; }"
+            "border: 1px solid #7a2020; border-radius: 6px; "
+            "font-weight: 600; padding: 4px 18px; }"
             "QPushButton:hover { background: #5a1a1a; }")
         clear_btn.clicked.connect(lambda: (edit.clear(), dlg.accept()))
 
@@ -2046,15 +2085,16 @@ class FullscreenViewer(QtWidgets.QWidget):
         ok_btn.setDefault(True)
         ok_btn.setStyleSheet(
             "QPushButton { background: #1a3a5a; color: #32ade6; "
-            "border: 1px solid #1a6a9a; border-radius: 6px; font-weight: 700; padding: 4px 18px; }"
+            "border: 1px solid #1a6a9a; border-radius: 6px; "
+            "font-weight: 700; padding: 4px 18px; }"
             "QPushButton:hover { background: #1a4a7a; }")
         ok_btn.clicked.connect(dlg.accept)
 
-        btn_row.addWidget(cancel_btn)
-        btn_row.addStretch()
-        btn_row.addWidget(clear_btn)
-        btn_row.addWidget(ok_btn)
-        layout.addLayout(btn_row)
+        btn_row_layout.addWidget(cancel_btn)
+        btn_row_layout.addStretch()
+        btn_row_layout.addWidget(clear_btn)
+        btn_row_layout.addWidget(ok_btn)
+        layout.addLayout(btn_row_layout)
         edit.setFocus()
         edit.selectAll()
 
@@ -2062,7 +2102,6 @@ class FullscreenViewer(QtWidgets.QWidget):
             new_tag = edit.text().strip()
             if new_tag != current_tag:
                 if set_image_tag(path, new_tag):
-                    # Sync back to main list overlay
                     tov = self._list._tag_overlays.get(self._row)
                     if tov:
                         tov.set_tag(new_tag)
@@ -2077,34 +2116,22 @@ class FullscreenViewer(QtWidgets.QWidget):
             self._go(-1)
         elif key in (Qt.Key_Right, Qt.Key_Down):
             self._go(1)
-        elif key == Qt.Key_F:
-            self.close()
         elif key == Qt.Key_R:
-            self._toggle_star()
+            self._do_star()
         elif key == Qt.Key_D:
-            # Force unstar
-            item = self._list.item(self._row)
-            if item:
-                path = item.data(Qt.UserRole) or ""
-                if os.path.splitext(path)[1].lower() in XMP_SUPPORTED_EXT:
-                    if get_image_rating(path) == 5:
-                        if set_image_rating(path, 0):
-                            star = self._list._star_overlays.get(self._row)
-                            if star:
-                                star.set_starred(False)
-                            self.star_changed.emit(self._row, False)
-                            self._update_display()
+            self._do_unstar()
         elif key == Qt.Key_T:
             self._open_tag_dialog()
-        elif key == Qt.Key_Escape:
+        elif key in (Qt.Key_F, Qt.Key_Escape):
             self.close()
         else:
             super().keyPressEvent(event)
 
     def mousePressEvent(self, event):
-        # Click on main image area also grabs focus for keys
         self.setFocus()
         super().mousePressEvent(event)
+
+
 
 
 PROGRESS_IDLE_STYLE = """
