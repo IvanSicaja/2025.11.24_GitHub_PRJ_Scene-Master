@@ -1426,13 +1426,8 @@ class DragDropListWidget(QtWidgets.QListWidget):
         super().mouseMoveEvent(event)
 
     def keyPressEvent(self, event):
-        # S key: toggle star for selected thumbnail
+        # S key: add 5-star rating to all selected images
         if event.key() == Qt.Key_S:
-            self.toggle_star_for_selected()
-            event.accept()
-            return
-        # R key: mark all selected as favorite (star them)
-        if event.key() == Qt.Key_R:
             for item in self.selectedItems():
                 row  = self.row(item)
                 star = self._star_overlays.get(row)
@@ -1712,7 +1707,7 @@ class FullscreenViewer(QtWidgets.QWidget):
         left_widget.setFixedWidth(200)
         left_vbox = QtWidgets.QVBoxLayout(left_widget)
         left_vbox.setContentsMargins(0, 0, 0, 0)
-        left_vbox.setSpacing(5)
+        left_vbox.setSpacing(8)
         left_vbox.addStretch()
 
         self._star_btn = QtWidgets.QPushButton()
@@ -1723,7 +1718,7 @@ class FullscreenViewer(QtWidgets.QWidget):
         self._tag_btn.setFixedHeight(self._BTN_H)
         self._tag_btn.clicked.connect(self._open_tag_dialog)
 
-        self._close_btn = QtWidgets.QPushButton("\u2715  Close  (F)")
+        self._close_btn = QtWidgets.QPushButton("\u2715  Close  (F/Esc)")
         self._close_btn.setFixedHeight(self._BTN_H)
         self._close_btn.setStyleSheet("""
             QPushButton {
@@ -1888,7 +1883,7 @@ class FullscreenViewer(QtWidgets.QWidget):
         bh = self._BTN_H
         is_starred = self._get_current_starred(path)
         if is_starred:
-            self._star_btn.setText("\u2605  Remove Star  (R)")
+            self._star_btn.setText("\u2605  Remove Star  (S)")
             self._star_btn.setStyleSheet(f"""
                 QPushButton {{
                     background: #2a2000; color: #ffd60a; border: 1px solid #ffd60a;
@@ -1899,7 +1894,7 @@ class FullscreenViewer(QtWidgets.QWidget):
                 QPushButton:pressed {{ background: #1a1400; }}
             """)
         else:
-            self._star_btn.setText("\u2606  Add Star  (R)")
+            self._star_btn.setText("\u2606  Add Star  (S)")
             self._star_btn.setStyleSheet(f"""
                 QPushButton {{
                     background: #1a1a1c; color: #666668; border: 1px solid #2e2e30;
@@ -2085,7 +2080,7 @@ class FullscreenViewer(QtWidgets.QWidget):
             self._go(-1)
         elif k in (Qt.Key_Right, Qt.Key_Down):
             self._go(1)
-        elif k == Qt.Key_R:
+        elif k == Qt.Key_S:
             self._toggle_star()
         elif k == Qt.Key_D:
             self._do_unstar()
@@ -2630,14 +2625,50 @@ class ImageOrganizer(QtWidgets.QMainWindow):
 
         banner_layout.addWidget(banner_icon)
         banner_layout.addWidget(self.scene_banner_label, 1)
-        banner_layout.addWidget(banner_hint)
 
-        # Right-side container: banner on top, list below
+        # ── Colored keyboard hint bar (between scene banner and thumbnails) ───
+        hint_bar = QtWidgets.QWidget()
+        hint_bar.setFixedHeight(22)
+        hint_bar.setStyleSheet(
+            "background: #0a0f14; border-bottom: 1px solid #1a2a3a;")
+        hint_bar_layout = QtWidgets.QHBoxLayout(hint_bar)
+        hint_bar_layout.setContentsMargins(12, 0, 12, 0)
+        hint_bar_layout.setSpacing(0)
+
+        def _hint_lbl(text, color):
+            lbl = QtWidgets.QLabel(text)
+            lbl.setStyleSheet(
+                f"color: {color}; font-size: 10px; font-weight: 600; "
+                "background: transparent; border: none;")
+            return lbl
+
+        def _sep():
+            s = QtWidgets.QLabel("  ·  ")
+            s.setStyleSheet(
+                "color: #1e2e3e; font-size: 10px; "
+                "background: transparent; border: none;")
+            return s
+
+        hint_bar_layout.addWidget(_hint_lbl("S  Add Star", "#b88000"))
+        hint_bar_layout.addWidget(_sep())
+        hint_bar_layout.addWidget(_hint_lbl("D  Remove Star", "#444450"))
+        hint_bar_layout.addWidget(_sep())
+        hint_bar_layout.addWidget(_hint_lbl("T  Tag", "#1a6a9a"))
+        hint_bar_layout.addWidget(_sep())
+        hint_bar_layout.addWidget(_hint_lbl("F  Fullscreen", "#206040"))
+        hint_bar_layout.addWidget(_sep())
+        hint_bar_layout.addWidget(_hint_lbl("B / Right-click  Base Name", "#2a3a2a"))
+        hint_bar_layout.addWidget(_sep())
+        hint_bar_layout.addWidget(_hint_lbl("← →  Navigate", "#252535"))
+        hint_bar_layout.addStretch()
+
+        # Right-side container: scene banner → hint bar → thumbnail list
         right_container = QtWidgets.QWidget()
         right_vbox = QtWidgets.QVBoxLayout(right_container)
         right_vbox.setContentsMargins(0, 0, 0, 0)
         right_vbox.setSpacing(0)
         right_vbox.addWidget(self.scene_banner)
+        right_vbox.addWidget(hint_bar)
         right_vbox.addWidget(self.list, 1)
 
         # ── Main layout ───────────────────────────────────────────────────────
@@ -2659,7 +2690,26 @@ class ImageOrganizer(QtWidgets.QMainWindow):
 
         self.show()
 
-    # ── Scene banner ──────────────────────────────────────────────────────────
+    # ── Global key handler (F = fullscreen from anywhere) ─────────────────────
+
+    def keyPressEvent(self, event):
+        """
+        Catch F pressed anywhere in the main window — unless focus is inside
+        a text input (QLineEdit / QSpinBox) where F is a normal character.
+        """
+        if event.key() == Qt.Key_F:
+            focused = QtWidgets.QApplication.focusWidget()
+            if not isinstance(focused, (QtWidgets.QLineEdit, QtWidgets.QSpinBox,
+                                        QtWidgets.QAbstractSpinBox)):
+                # Open fullscreen at the current/selected row
+                row = self.list.currentRow()
+                if row < 0 and self.list.count() > 0:
+                    row = 0
+                if row >= 0:
+                    self._open_fullscreen(row)
+                event.accept()
+                return
+        super().keyPressEvent(event)
 
     def _update_scene_banner(self):
         """
