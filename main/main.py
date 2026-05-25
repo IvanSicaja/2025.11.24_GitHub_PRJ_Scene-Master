@@ -1249,7 +1249,14 @@ class DragDropListWidget(QtWidgets.QListWidget):
                 self._position_star(i)
 
     def _on_star_toggled(self, row: int, state: bool):
-        pass
+        # Notify parent organizer to refresh the filter if active
+        parent = self.parent()
+        while parent is not None:
+            if hasattr(parent, '_favorites_filter_active'):
+                if parent._favorites_filter_active:
+                    QTimer.singleShot(0, parent._apply_favorites_filter)
+                break
+            parent = parent.parent() if hasattr(parent, 'parent') else None
 
     def clear_stars(self):
         for star in self._star_overlays.values():
@@ -1426,9 +1433,17 @@ class DragDropListWidget(QtWidgets.QListWidget):
         super().mouseMoveEvent(event)
 
     def keyPressEvent(self, event):
-        # S key: add 5-star rating to all selected images
+        # S key: add 5-star rating to selected images (falls back to current row)
         if event.key() == Qt.Key_S:
-            for item in self.selectedItems():
+            targets = self.selectedItems()
+            if not targets:
+                # Nothing selected — act on whatever row has keyboard focus
+                row = self.currentRow()
+                if row >= 0:
+                    item = self.item(row)
+                    if item:
+                        targets = [item]
+            for item in targets:
                 row  = self.row(item)
                 star = self._star_overlays.get(row)
                 if star and star._supported and not star.is_starred():
@@ -1436,9 +1451,16 @@ class DragDropListWidget(QtWidgets.QListWidget):
                         star.set_starred(True)
             event.accept()
             return
-        # D key: unstar all selected (remove favorite)
+        # D key: unstar selected images (falls back to current row)
         if event.key() == Qt.Key_D:
-            for item in self.selectedItems():
+            targets = self.selectedItems()
+            if not targets:
+                row = self.currentRow()
+                if row >= 0:
+                    item = self.item(row)
+                    if item:
+                        targets = [item]
+            for item in targets:
                 row  = self.row(item)
                 star = self._star_overlays.get(row)
                 if star and star._supported and star.is_starred():
@@ -1482,17 +1504,29 @@ class DragDropListWidget(QtWidgets.QListWidget):
                 self.b_key_pressed.emit(name_no_ext)
             event.accept()
             return
-        # Arrow keys: navigate thumbnails
+        # Arrow keys: navigate thumbnails (skips hidden/filtered rows)
         if event.key() in (Qt.Key_Left, Qt.Key_Right):
-            current_row = self.currentRow()
-            total       = self.count()
+            total = self.count()
             if total == 0:
                 return
-            new_row = (current_row - 1) % total if event.key() == Qt.Key_Left \
-                      else (current_row + 1) % total
-            self.setCurrentRow(new_row)
-            item = self.item(new_row)
-            self.scrollToItem(item, QAbstractItemView.PositionAtCenter)
+            current_row = self.currentRow()
+            # If nothing is current, start from row 0
+            if current_row < 0:
+                current_row = 0
+                self.setCurrentRow(0)
+                self.scrollToItem(self.item(0), QAbstractItemView.PositionAtCenter)
+                event.accept()
+                return
+            # Step through visible (non-hidden) rows
+            step = -1 if event.key() == Qt.Key_Left else 1
+            row  = current_row
+            for _ in range(total):
+                row = (row + step) % total
+                item = self.item(row)
+                if item and not item.isHidden():
+                    self.setCurrentRow(row)
+                    self.scrollToItem(item, QAbstractItemView.PositionAtCenter)
+                    break
             event.accept()
             return
         super().keyPressEvent(event)
@@ -1671,8 +1705,8 @@ class FullscreenViewer(QtWidgets.QWidget):
     _STRIP_H   = 80
     _STRIP_GAP = 10
     _BAR_H     = 134
-    _BTN_H     = 26
-    _BTN_W     = 188
+    _BTN_H     = 24
+    _BTN_W     = 186
 
     def __init__(self, list_widget, start_row, parent=None):
         super().__init__(parent, Qt.Window | Qt.FramelessWindowHint)
@@ -1715,7 +1749,7 @@ class FullscreenViewer(QtWidgets.QWidget):
         left_widget.setFixedWidth(210)
         left_vbox = QtWidgets.QVBoxLayout(left_widget)
         left_vbox.setContentsMargins(0, 0, 0, 0)
-        left_vbox.setSpacing(10)
+        left_vbox.setSpacing(8)
         left_vbox.addStretch()
 
         self._star_btn = QtWidgets.QPushButton()
@@ -1854,16 +1888,37 @@ class FullscreenViewer(QtWidgets.QWidget):
     # ── navigation ────────────────────────────────────────────────────────────
 
     def _go(self, delta):
-        new_row = self._row + delta
-        if 0 <= new_row < self._total:
-            self._row = new_row
+        """Navigate by *delta* steps, skipping rows hidden by the favorites filter."""
+        step    = 1 if delta > 0 else -1
+        row     = self._row
+        moved   = 0
+        target  = abs(delta)
+        while moved < target:
+            row += step
+            if row < 0 or row >= self._total:
+                return   # hit the boundary — stop
+            item = self._list.item(row)
+            if item is not None and not item.isHidden():
+                moved += 1
+        if row != self._row:
+            self._row = row
             self.row_changed.emit(self._row)
             self._update_display()
 
     def _strip_clicked(self, offset):
-        new_row = self._row + offset
-        if 0 <= new_row < self._total:
-            self._row = new_row
+        """Click on a film-strip cell — jump directly to that row (filter skipping here too)."""
+        step      = 1 if offset > 0 else -1
+        row       = self._row
+        remaining = abs(offset)
+        while remaining > 0:
+            row += step
+            if row < 0 or row >= self._total:
+                return
+            item = self._list.item(row)
+            if item is not None and not item.isHidden():
+                remaining -= 1
+        if row != self._row:
+            self._row = row
             self.row_changed.emit(self._row)
             self._update_display()
 
@@ -1923,7 +1978,7 @@ class FullscreenViewer(QtWidgets.QWidget):
                 QPushButton {{
                     background: #2a2000; color: #ffd60a; border: 1px solid #ffd60a;
                     border-radius: 6px; font-size: 11px; font-weight: 700;
-                    padding: 4px 10px; min-height: {bh}px;
+                    padding: 4px 10px;
                 }}
                 QPushButton:hover   {{ background: #3a3000; border-color: #ffee44; }}
                 QPushButton:pressed {{ background: #1a1400; }}
@@ -1934,7 +1989,7 @@ class FullscreenViewer(QtWidgets.QWidget):
                 QPushButton {{
                     background: #1a1a1c; color: #666668; border: 1px solid #2e2e30;
                     border-radius: 6px; font-size: 11px; font-weight: 600;
-                    padding: 4px 10px; min-height: {bh}px;
+                    padding: 4px 10px;
                 }}
                 QPushButton:hover   {{ background: #2a2000; color: #ffd60a;
                                        border-color: #665500; }}
@@ -1949,7 +2004,7 @@ class FullscreenViewer(QtWidgets.QWidget):
                 QPushButton {{
                     background: #0a1e30; color: #32ade6; border: 1px solid #1a6090;
                     border-radius: 6px; font-size: 11px; font-weight: 700;
-                    padding: 4px 10px; min-height: {bh}px;
+                    padding: 4px 10px;
                 }}
                 QPushButton:hover   {{ background: #1a3a5a; border-color: #2a80c0; }}
                 QPushButton:pressed {{ background: #061422; }}
@@ -1960,7 +2015,7 @@ class FullscreenViewer(QtWidgets.QWidget):
                 QPushButton {{
                     background: #1a1a1c; color: #444448; border: 1px solid #2a2a2c;
                     border-radius: 6px; font-size: 11px; font-weight: 600;
-                    padding: 4px 10px; min-height: {bh}px;
+                    padding: 4px 10px;
                 }}
                 QPushButton:hover   {{ background: #0a1e30; color: #32ade6;
                                        border-color: #1a5580; }}
@@ -2620,13 +2675,17 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         inner_layout.addSpacing(6)
 
         export_info_lbl = QtWidgets.QLabel(
-            "Copies all ★ starred images into  <b>00_favorites/</b>  inside the open folder.<br>"
-            "<span style='color:#555560;'>If the folder already exists, its contents are "
-            "cleared and replaced with the current favorites.</span>")
+            "<span style='color:#c8980a;'>★</span>"
+            "<span style='color:#8a7030;'> Copies all starred images into "
+            "<b style='color:#c8980a;'>00_favorites/</b> inside the open folder.</span><br>"
+            "<span style='color:#c8980a;'>★</span>"
+            "<span style='color:#8a7030;'> If that folder already exists, "
+            "it is cleared and replaced with the current favorites.</span>")
         export_info_lbl.setTextFormat(Qt.RichText)
         export_info_lbl.setWordWrap(True)
         export_info_lbl.setStyleSheet(
-            "color: #7a7a82; font-size: 10px; background: transparent; border: none;")
+            "font-size: 10px; font-weight: 600; "
+            "background: transparent; border: none; line-height: 160%;")
         inner_layout.addWidget(export_info_lbl)
         inner_layout.addSpacing(5)
 
@@ -2804,6 +2863,28 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         hint_bar_layout.addWidget(_hint_lbl(" Navigate", "#253050"))
         hint_bar_layout.addStretch()
 
+        # ★ Favorites filter toggle — right side of hint bar
+        self._favorites_filter_active = False
+        self._fav_filter_btn = QtWidgets.QPushButton("★  Show Favorites Only")
+        self._fav_filter_btn.setFixedHeight(18)
+        self._fav_filter_btn.setCheckable(True)
+        self._fav_filter_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent; color: #555560;
+                border: 1px solid #2a2a30; border-radius: 4px;
+                font-size: 10px; font-weight: 600; padding: 0px 8px;
+            }
+            QPushButton:hover   { color: #c8980a; border-color: #665500; }
+            QPushButton:checked {
+                background: #1a1500; color: #ffd60a;
+                border: 1px solid #c8980a;
+            }
+            QPushButton:checked:hover { background: #2a2000; }
+        """)
+        self._fav_filter_btn.clicked.connect(self._toggle_favorites_filter)
+        hint_bar_layout.addWidget(self._fav_filter_btn)
+        hint_bar_layout.addSpacing(6)
+
         # Right-side container: scene banner → hint bar → thumbnail list
         right_container = QtWidgets.QWidget()
         right_vbox = QtWidgets.QVBoxLayout(right_container)
@@ -2836,28 +2917,36 @@ class ImageOrganizer(QtWidgets.QMainWindow):
 
     def keyPressEvent(self, event):
         """
-        Catch F pressed anywhere in the main window — unless focus is inside
-        a text input (QLineEdit / QSpinBox) where F is a normal character.
-        If the fullscreen viewer is already open, F closes it instead.
+        Catch key presses at the main-window level.
+        S / D are forwarded to the thumbnail list so they work even when a
+        button or other widget has focus (not the list itself).
+        F toggles fullscreen (skipped when a text input has focus).
         """
-        if event.key() == Qt.Key_F:
-            focused = QtWidgets.QApplication.focusWidget()
-            if not isinstance(focused, (QtWidgets.QLineEdit, QtWidgets.QSpinBox,
-                                        QtWidgets.QAbstractSpinBox)):
-                # Toggle: close if open, open if closed
-                if hasattr(self, '_viewer') and self._viewer is not None:
-                    try:
-                        self._viewer.close()
-                    except RuntimeError:
-                        self._viewer = None
-                else:
-                    row = self.list.currentRow()
-                    if row < 0 and self.list.count() > 0:
-                        row = 0
-                    if row >= 0:
-                        self._open_fullscreen(row)
-                event.accept()
-                return
+        focused = QtWidgets.QApplication.focusWidget()
+        in_text = isinstance(focused, (QtWidgets.QLineEdit, QtWidgets.QSpinBox,
+                                       QtWidgets.QAbstractSpinBox))
+
+        if event.key() == Qt.Key_F and not in_text:
+            if hasattr(self, '_viewer') and self._viewer is not None:
+                try:
+                    self._viewer.close()
+                except RuntimeError:
+                    self._viewer = None
+            else:
+                row = self.list.currentRow()
+                if row < 0 and self.list.count() > 0:
+                    row = 0
+                if row >= 0:
+                    self._open_fullscreen(row)
+            event.accept()
+            return
+
+        # Forward S / D to the list widget regardless of which widget has focus,
+        # unless a text input is focused (where S/D are normal characters).
+        if event.key() in (Qt.Key_S, Qt.Key_D) and not in_text:
+            self.list.keyPressEvent(event)
+            return
+
         super().keyPressEvent(event)
 
     def _update_scene_banner(self):
@@ -2937,6 +3026,36 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                 }
             """)
 
+    # ── Favorites filter ──────────────────────────────────────────────────────
+
+    def _toggle_favorites_filter(self):
+        """Toggle showing only starred images in the thumbnail grid."""
+        self._favorites_filter_active = self._fav_filter_btn.isChecked()
+        self._apply_favorites_filter()
+
+    def _apply_favorites_filter(self):
+        """
+        Show/hide thumbnails based on the favorites filter state.
+        When active: only starred images are visible.
+        When inactive: all images are visible.
+        Also updates overlays and the scene banner after applying.
+        """
+        active = self._favorites_filter_active
+        for i in range(self.list.count()):
+            item = self.list.item(i)
+            if item is None:
+                continue
+            if active:
+                star = self.list._star_overlays.get(i)
+                is_starred = star.is_starred() if star else False
+                item.setHidden(not is_starred)
+            else:
+                item.setHidden(False)
+
+        # Reposition overlays since visibility changed
+        QTimer.singleShot(30, self.list._reposition_overlays)
+        QTimer.singleShot(60, self._update_scene_banner)
+
     # ── Fullscreen viewer ─────────────────────────────────────────────────────
 
     def _open_fullscreen(self, start_row: int):
@@ -2969,12 +3088,34 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         viewer.setAttribute(Qt.WA_DeleteOnClose, True)
         viewer.destroyed.connect(self._on_fullscreen_closed)
         self._viewer = viewer
+        self._last_fullscreen_row = start_row   # seed for close restore
         viewer.showFullScreen()
         viewer.setFocus()
 
     def _on_fullscreen_closed(self):
-        """Called when the fullscreen viewer is destroyed."""
+        """
+        Called when the fullscreen viewer is destroyed.
+        Restores focus and selection to the last row viewed in fullscreen
+        so arrow keys work immediately without needing a mouse click.
+        """
+        last_row = getattr(self, '_last_fullscreen_row', -1)
         self._viewer = None
+        self.list.setFocus()
+        if 0 <= last_row < self.list.count():
+            item = self.list.item(last_row)
+            if item and not item.isHidden():
+                self.list.setCurrentRow(last_row)
+                self.list.scrollToItem(item, QAbstractItemView.PositionAtCenter)
+            else:
+                # Last row is hidden (filtered) — pick nearest visible row
+                for r in range(last_row, -1, -1):
+                    it = self.list.item(r)
+                    if it and not it.isHidden():
+                        self.list.setCurrentRow(r)
+                        self.list.scrollToItem(it, QAbstractItemView.PositionAtCenter)
+                        break
+        elif self.list.count() > 0:
+            self.list.setCurrentRow(0)
 
     def _close_fullscreen_if_open(self):
         """Close the fullscreen viewer if it is currently open."""
@@ -2987,6 +3128,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
 
     def _on_fullscreen_row_changed(self, row: int):
         """Keep the thumbnail grid and normal preview in sync with fullscreen navigation."""
+        self._last_fullscreen_row = row   # remember for focus restore on close
         if 0 <= row < self.list.count():
             self.list.clearSelection()
             item = self.list.item(row)
@@ -3005,8 +3147,10 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                         self.preview.setPixmap(scaled)
 
     def _on_fullscreen_star_changed(self, row: int, starred: bool):
-        """Star overlay in main grid already updated by FullscreenViewer; emit scene banner refresh."""
+        """Star overlay in main grid already updated by FullscreenViewer; refresh banner and filter."""
         self._update_scene_banner()
+        if self._favorites_filter_active:
+            self._apply_favorites_filter()
 
     def _on_fullscreen_tag_changed(self, row: int, tag_text: str):
         """Tag overlay in main grid already updated by FullscreenViewer; refresh banner."""
@@ -3150,8 +3294,18 @@ class ImageOrganizer(QtWidgets.QMainWindow):
     def load_folder_contents(self):
         if not self.folder:
             return
+        # Generation counter: if open_folder is called again while loading,
+        # the old loop sees its generation is stale and stops immediately.
+        if not hasattr(self, '_load_gen'):
+            self._load_gen = 0
+        self._load_gen += 1
+        my_gen = self._load_gen
+
         self._progress_start()
         QApplication.processEvents()
+        # Reset favorites filter on new folder load
+        self._favorites_filter_active = False
+        self._fav_filter_btn.setChecked(False)
         self.list.clear_overlays()
         self.list.clear()
         self.list.thumbnail_cache.clear()
@@ -3160,6 +3314,9 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         files.sort(key=natural_key)
         total_files = len(files)
         for idx, f in enumerate(files):
+            # Abort if a newer load has started (new folder selected mid-load)
+            if self._load_gen != my_gen:
+                return
             path = os.path.join(self.folder, f)
             item = QtWidgets.QListWidgetItem(os.path.basename(f))
             item.setData(Qt.UserRole, path)
@@ -3170,10 +3327,16 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             progress = int(((idx + 1) / total_files) * 100) if total_files > 0 else 100
             self.progress_bar.setValue(progress)
             QApplication.processEvents()
+        # Final check: if superseded, leave without updating state
+        if self._load_gen != my_gen:
+            return
         self._progress_done()
-        # Final reposition after all items are laid out
         QTimer.singleShot(100, self.list._reposition_overlays)
         QTimer.singleShot(150, self._update_scene_banner)
+        # Auto-select and focus the first item so arrow keys work immediately
+        if self.list.count() > 0:
+            self.list.setCurrentRow(0)
+            self.list.setFocus()
         self.current_folder_files = set(files)
         self.update_status_label(in_sync=True)
         self.setWindowTitle(
@@ -3206,8 +3369,17 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             self.list._rebuild_tag_index()
             self.current_folder_files = current_files
 
+            # Show the "images removed" dialog.
+            # If fullscreen is open, parent the dialog to the viewer so it
+            # appears on top of it — user can confirm without leaving fullscreen.
+            fullscreen_open = hasattr(self, '_viewer') and self._viewer is not None
+            try:
+                dialog_parent = self._viewer if fullscreen_open else self
+            except Exception:
+                dialog_parent = self
+
             removed_sorted = sorted(removed, key=natural_key)
-            dialog = QtWidgets.QDialog(self)
+            dialog = QtWidgets.QDialog(dialog_parent)
             dialog.setWindowTitle("Images Removed from Folder")
             dialog.setMinimumWidth(420)
             dialog.setMinimumHeight(280)
@@ -3248,11 +3420,19 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                 QPushButton:pressed { background: #0051A3; }
             """)
             ok_btn.clicked.connect(dialog.accept)
-            btn_row = QtWidgets.QHBoxLayout()
-            btn_row.addStretch()
-            btn_row.addWidget(ok_btn)
-            dlg_layout.addLayout(btn_row)
+            btn_row_layout = QtWidgets.QHBoxLayout()
+            btn_row_layout.addStretch()
+            btn_row_layout.addWidget(ok_btn)
+            dlg_layout.addLayout(btn_row_layout)
             dialog.exec_()
+
+            # After dialog closes, re-raise fullscreen if it was open
+            if fullscreen_open:
+                try:
+                    self._viewer.raise_()
+                    self._viewer.activateWindow()
+                except RuntimeError:
+                    pass
             if added:
                 self.update_status_label(in_sync=False, added_count=len(added), removed_count=0)
             else:
