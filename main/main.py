@@ -2375,22 +2375,23 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         bottom_btn.setFixedHeight(26)
         bottom_btn.clicked.connect(self.move_to_bottom)
 
-        rename_all_btn = QtWidgets.QPushButton("Rename All")
-        rename_all_btn.setStyleSheet(blue_btn_style)
-        rename_all_btn.setFixedHeight(26)
-        rename_all_btn.clicked.connect(self.rename_ordered)
+        self.rename_all_btn = QtWidgets.QPushButton("Rename All")
+        self.rename_all_btn.setStyleSheet(blue_btn_style)
+        self.rename_all_btn.setFixedHeight(26)
+        self.rename_all_btn.clicked.connect(self.rename_ordered)
 
-        rename_selected_btn = QtWidgets.QPushButton("Rename Selected")
-        rename_selected_btn.setStyleSheet(blue_btn_style)
-        rename_selected_btn.setFixedHeight(26)
-        rename_selected_btn.clicked.connect(self.rename_selected)
+        self.rename_selected_btn = QtWidgets.QPushButton("Rename Selected")
+        self.rename_selected_btn.setStyleSheet(blue_btn_style)
+        self.rename_selected_btn.setFixedHeight(26)
+        self.rename_selected_btn.clicked.connect(self.rename_selected)
 
         # ── Rename Selected inline options ────────────────────────────────────
-        rename_options_frame = QtWidgets.QFrame()
-        rename_options_frame.setStyleSheet("""
+        self.rename_options_frame = QtWidgets.QFrame()
+        self.rename_options_frame.setStyleSheet("""
             QFrame { background: #2c2c2e; border: 1px solid #3a3a3c; border-radius: 8px; }
         """)
-        rename_options_layout = QtWidgets.QVBoxLayout(rename_options_frame)
+        rename_options_frame = self.rename_options_frame   # local alias for layout building
+        rename_options_layout = QtWidgets.QVBoxLayout(self.rename_options_frame)
         rename_options_layout.setContentsMargins(10, 6, 10, 6)
         rename_options_layout.setSpacing(4)
 
@@ -2486,11 +2487,11 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         rename_options_layout.addLayout(digits_row)
         rename_options_layout.addWidget(digits_example_label)
 
-        renumber_btn = QtWidgets.QPushButton("Re-enumerate by Base Name")
-        renumber_btn.setToolTip(
+        self.renumber_btn = QtWidgets.QPushButton("Re-enumerate by Base Name")
+        self.renumber_btn.setToolTip(
             "Finds all images whose name starts with the Base Name entered above,\n"
             "then re-numbers them 01, 02, 03 … in their current visual order.")
-        renumber_btn.setStyleSheet("""
+        self.renumber_btn.setStyleSheet("""
             QPushButton {
                 padding: 4px 10px; font-weight: 600; font-size: 11px;
                 border-radius: 5px; margin: 2px 0 0 0;
@@ -2499,9 +2500,9 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             QPushButton:hover   { background: #1e6e3e; color: #ffffff; }
             QPushButton:pressed { background: #155230; }
         """)
-        renumber_btn.setFixedHeight(26)
-        renumber_btn.clicked.connect(self.renumber_by_base)
-        rename_options_layout.addWidget(renumber_btn)
+        self.renumber_btn.setFixedHeight(26)
+        self.renumber_btn.clicked.connect(self.renumber_by_base)
+        rename_options_layout.addWidget(self.renumber_btn)
 
         # ── Thumbnail size ────────────────────────────────────────────────────
         self.thumb_label = QtWidgets.QLabel("Thumbnail Size:")
@@ -2642,13 +2643,40 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         inner_layout.setSpacing(4)
         inner_layout.setContentsMargins(0, 0, 6, 0)
 
+        # ── Rename lock toggle ────────────────────────────────────────────────
+        # Default: renaming is LOCKED (safe). Must be explicitly unlocked.
+        self._rename_unlocked = False
+        self._rename_lock_btn = QtWidgets.QPushButton("🔒  Renaming Locked  (Safe)")
+        self._rename_lock_btn.setFixedHeight(28)
+        self._rename_lock_btn.setToolTip(
+            "Click to unlock renaming.\n"
+            "Green = locked (safe, no accidental renames).\n"
+            "Red   = unlocked (rename operations enabled — be careful!).")
+        self._rename_lock_btn.setStyleSheet("""
+            QPushButton {
+                padding: 4px 10px; font-weight: 700; font-size: 11px;
+                border-radius: 5px; margin: 1px 0;
+                background: #0d2a12; color: #30d158; border: 1px solid #30d158;
+            }
+            QPushButton:hover   { background: #174a20; color: #5eff88; }
+            QPushButton:pressed { background: #0a1e0d; }
+        """)
+        self._rename_lock_btn.clicked.connect(self._toggle_rename_lock)
+
         inner_layout.addWidget(open_btn)
         inner_layout.addWidget(reload_btn)
         inner_layout.addWidget(top_btn)
         inner_layout.addWidget(bottom_btn)
-        inner_layout.addWidget(rename_all_btn)
-        inner_layout.addWidget(rename_selected_btn)
-        inner_layout.addWidget(rename_options_frame)
+        inner_layout.addSpacing(2)
+        inner_layout.addWidget(self._rename_lock_btn)
+        inner_layout.addWidget(self.rename_all_btn)
+        inner_layout.addWidget(self.rename_selected_btn)
+        inner_layout.addWidget(self.rename_options_frame)
+
+        # Disable all rename controls on startup (locked by default)
+        self.rename_all_btn.setEnabled(False)
+        self.rename_selected_btn.setEnabled(False)
+        self.rename_options_frame.setEnabled(False)
         inner_layout.addSpacing(4)
         inner_layout.addLayout(thumb_label_row)
         inner_layout.addWidget(self.thumb_slider)
@@ -3153,6 +3181,40 @@ class ImageOrganizer(QtWidgets.QMainWindow):
     def _on_fullscreen_tag_changed(self, row: int, tag_text: str):
         """Tag overlay in main grid already updated by FullscreenViewer; refresh banner."""
         self._update_scene_banner()
+
+    # ── Rename lock ───────────────────────────────────────────────────────────
+
+    def _toggle_rename_lock(self):
+        """Toggle the rename lock. Green = locked (safe). Red = unlocked (enabled)."""
+        self._rename_unlocked = not self._rename_unlocked
+        enabled = self._rename_unlocked
+
+        self.rename_all_btn.setEnabled(enabled)
+        self.rename_selected_btn.setEnabled(enabled)
+        self.rename_options_frame.setEnabled(enabled)
+
+        if enabled:
+            self._rename_lock_btn.setText("🔓  Renaming Unlocked  (Careful!)")
+            self._rename_lock_btn.setStyleSheet("""
+                QPushButton {
+                    padding: 4px 10px; font-weight: 700; font-size: 11px;
+                    border-radius: 5px; margin: 1px 0;
+                    background: #2a0d0d; color: #ff6b35; border: 1px solid #cc4400;
+                }
+                QPushButton:hover   { background: #3a1510; color: #ff8855; border-color: #ff6b35; }
+                QPushButton:pressed { background: #1a0808; }
+            """)
+        else:
+            self._rename_lock_btn.setText("🔒  Renaming Locked  (Safe)")
+            self._rename_lock_btn.setStyleSheet("""
+                QPushButton {
+                    padding: 4px 10px; font-weight: 700; font-size: 11px;
+                    border-radius: 5px; margin: 1px 0;
+                    background: #0d2a12; color: #30d158; border: 1px solid #30d158;
+                }
+                QPushButton:hover   { background: #174a20; color: #5eff88; }
+                QPushButton:pressed { background: #0a1e0d; }
+            """)
 
     # ── B-key ─────────────────────────────────────────────────────────────────
 
