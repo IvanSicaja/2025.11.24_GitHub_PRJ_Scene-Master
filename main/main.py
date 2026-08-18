@@ -3666,20 +3666,17 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         for item in reversed(move_items):
             self.list.takeItem(self.list.row(item))
 
-        # After taking items out, tag groups may have shifted — recalculate
-        # the target row by finding the tag marker image by path
-        tag_marker_path = None
+        # CRITICAL: rebuild tag index NOW so _tag_overlays has correct
+        # row keys after the items were removed.  Without this, the
+        # overlay dict still maps old (pre-removal) row numbers and
+        # the group-end search below looks up stale keys.
+        self.list._rebuild_tag_index()
+
+        # Find the tag marker row by scanning the freshly-rebuilt overlays
+        tag_marker_row = -1
         for row, tov in self.list._tag_overlays.items():
             if tov.get_tag() == chosen_group['tag']:
-                tag_marker_path = tov._path
-                break
-
-        # Find the new row of the tag marker
-        tag_marker_row = -1
-        for i in range(self.list.count()):
-            item = self.list.item(i)
-            if item and (item.data(Qt.UserRole) or "") == tag_marker_path:
-                tag_marker_row = i
+                tag_marker_row = row
                 break
 
         if tag_marker_row < 0:
@@ -3688,12 +3685,14 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             insert_at = self.list.count()
         else:
             # Find end of this tag group (next tag or end of list)
+            # using the REBUILT overlay dict with correct row keys
             group_end = self.list.count() - 1
-            for i in range(tag_marker_row + 1, self.list.count()):
-                tov = self.list._tag_overlays.get(i)
-                if tov and tov.get_tag():
-                    group_end = i - 1
-                    break
+            for row in sorted(self.list._tag_overlays.keys()):
+                if row > tag_marker_row:
+                    tov = self.list._tag_overlays[row]
+                    if tov.get_tag():
+                        group_end = row - 1
+                        break
 
             if position == 'end':
                 insert_at = group_end + 1
