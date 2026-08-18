@@ -1754,7 +1754,7 @@ class FullscreenViewer(QtWidgets.QWidget):
         bh = self._BTN_H
         is_starred = self._get_current_starred(path)
         if is_starred:
-            self._star_btn.setText("\u2605  Starred  (S)")
+            self._star_btn.setText("\u2605  Starred  (S)  ·  Remove (D)")
             self._star_btn.setStyleSheet(f"""
                 QPushButton {{
                     background: #2a2000; color: #ffd60a; border: 1px solid #ffd60a;
@@ -2634,25 +2634,48 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         banner_layout.addWidget(banner_icon)
         banner_layout.addWidget(self.scene_banner_label, 1)
 
-        # ── "Scroll back" button — returns to origin after a move operation ──
-        self._scroll_back_row = -1  # row to scroll back to (set by move ops)
-        self._scroll_back_btn = QtWidgets.QPushButton("⟲")
-        self._scroll_back_btn.setFixedSize(26, 22)
-        self._scroll_back_btn.setToolTip(
-            "Scroll back to where the last moved images were selected from")
-        self._scroll_back_btn.setStyleSheet("""
+        # ── Scroll origin / destination buttons after move operations ────────
+        self._scroll_origin_row = -1   # where images were BEFORE the move
+        self._scroll_dest_row   = -1   # where images ARE after the move
+
+        nav_btn_style_origin = """
             QPushButton {
                 background: #1a2a1a; color: #50c878; border: 1px solid #2a5a2a;
-                border-radius: 4px; font-size: 14px; font-weight: 700;
-                padding: 0px;
+                border-radius: 4px; font-size: 10px; font-weight: 700;
+                padding: 0px 5px;
             }
             QPushButton:hover { background: #2a3a2a; color: #70e898; border-color: #3a7a3a; }
             QPushButton:pressed { background: #0a1a0a; }
             QPushButton:disabled { background: #1a1a1c; color: #3a3a3c; border-color: #2a2a2c; }
-        """)
-        self._scroll_back_btn.setEnabled(False)
-        self._scroll_back_btn.clicked.connect(self._do_scroll_back)
-        banner_layout.addWidget(self._scroll_back_btn)
+        """
+        nav_btn_style_dest = """
+            QPushButton {
+                background: #1a1a2a; color: #6088e0; border: 1px solid #2a2a5a;
+                border-radius: 4px; font-size: 10px; font-weight: 700;
+                padding: 0px 5px;
+            }
+            QPushButton:hover { background: #2a2a3a; color: #80a8ff; border-color: #3a3a7a; }
+            QPushButton:pressed { background: #0a0a1a; }
+            QPushButton:disabled { background: #1a1a1c; color: #3a3a3c; border-color: #2a2a2c; }
+        """
+
+        self._scroll_origin_btn = QtWidgets.QPushButton("⟲ Origin")
+        self._scroll_origin_btn.setFixedHeight(22)
+        self._scroll_origin_btn.setToolTip(
+            "Scroll to where the moved images were before the operation")
+        self._scroll_origin_btn.setStyleSheet(nav_btn_style_origin)
+        self._scroll_origin_btn.setEnabled(False)
+        self._scroll_origin_btn.clicked.connect(self._do_scroll_to_origin)
+        banner_layout.addWidget(self._scroll_origin_btn)
+
+        self._scroll_dest_btn = QtWidgets.QPushButton("⟳ Moved")
+        self._scroll_dest_btn.setFixedHeight(22)
+        self._scroll_dest_btn.setToolTip(
+            "Scroll to where the moved images are now")
+        self._scroll_dest_btn.setStyleSheet(nav_btn_style_dest)
+        self._scroll_dest_btn.setEnabled(False)
+        self._scroll_dest_btn.clicked.connect(self._do_scroll_to_dest)
+        banner_layout.addWidget(self._scroll_dest_btn)
 
         # ── Tag jump dropdown — select a tag to scroll to it ─────────────────
         self._tag_jump_combo = QtWidgets.QComboBox()
@@ -2897,30 +2920,57 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self._tag_jump_combo.setCurrentIndex(0)
         self._tag_jump_combo.blockSignals(False)
 
-    # ── Scroll back after move ────────────────────────────────────────────────
+    # ── Scroll origin / destination after move ──────────────────────────────
 
-    def _save_scroll_back_position(self, row):
+    def _save_scroll_back_position(self, origin_row):
         """
-        Save a row index to scroll back to after a move operation.
-        Enables the scroll-back button.
+        Save the origin row (where images were before the move).
+        The destination row is set separately by _save_scroll_dest_position().
         """
-        if row < 0:
+        if origin_row < 0:
             return
-        # Clamp to current list size
-        self._scroll_back_row = min(row, self.list.count() - 1)
-        self._scroll_back_btn.setEnabled(True)
-        self._scroll_back_btn.setToolTip(
-            f"Scroll back to row {self._scroll_back_row} "
-            f"(origin of last move)")
+        self._scroll_origin_row = min(origin_row, max(self.list.count() - 1, 0))
+        self._scroll_origin_btn.setEnabled(True)
+        self._scroll_origin_btn.setToolTip(
+            f"Scroll to row {self._scroll_origin_row} — "
+            f"where images were before the move")
 
-    def _do_scroll_back(self):
-        """Scroll the list back to the saved position."""
-        row = self._scroll_back_row
+    def _save_scroll_dest_position(self, dest_row):
+        """Save the destination row (where moved images ended up)."""
+        if dest_row < 0:
+            return
+        self._scroll_dest_row = min(dest_row, max(self.list.count() - 1, 0))
+        self._scroll_dest_btn.setEnabled(True)
+        self._scroll_dest_btn.setToolTip(
+            f"Scroll to row {self._scroll_dest_row} — "
+            f"where the moved images are now")
+        # After a move we auto-scroll to destination, so disable dest initially
+        self._scroll_dest_btn.setEnabled(False)
+        self._scroll_origin_btn.setEnabled(True)
+
+    def _do_scroll_to_origin(self):
+        """Scroll to where the images were before the move."""
+        row = self._scroll_origin_row
         if row < 0 or row >= self.list.count():
             return
         item = self.list.item(row)
         if item:
             self.list.scrollToItem(item, QAbstractItemView.PositionAtCenter)
+        # Now we're at origin — disable origin, enable dest
+        self._scroll_origin_btn.setEnabled(False)
+        self._scroll_dest_btn.setEnabled(True)
+
+    def _do_scroll_to_dest(self):
+        """Scroll to where the moved images are now."""
+        row = self._scroll_dest_row
+        if row < 0 or row >= self.list.count():
+            return
+        item = self.list.item(row)
+        if item:
+            self.list.scrollToItem(item, QAbstractItemView.PositionAtCenter)
+        # Now we're at dest — disable dest, enable origin
+        self._scroll_dest_btn.setEnabled(False)
+        self._scroll_origin_btn.setEnabled(True)
 
     # ── Favorites filter ──────────────────────────────────────────────────────
 
@@ -3567,6 +3617,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             item.setSelected(True)
         self.list.setUpdatesEnabled(True)
         self.list.scrollToTop()
+        self._save_scroll_dest_position(0)
         self.list._rebuild_star_index()
         self.list._rebuild_tag_index()
         QTimer.singleShot(50, self.list._reposition_overlays)
@@ -3587,6 +3638,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             item.setSelected(True)
         self.list.setUpdatesEnabled(True)
         self.list.scrollToBottom()
+        self._save_scroll_dest_position(base)
         self.list._rebuild_star_index()
         self.list._rebuild_tag_index()
         QTimer.singleShot(50, self.list._reposition_overlays)
@@ -3833,6 +3885,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         # Scroll to show the moved items
         if move_items:
             self.list.scrollToItem(move_items[0], QAbstractItemView.PositionAtCenter)
+            self._save_scroll_dest_position(insert_at)
 
         # Rebuild overlays
         self.list._rebuild_star_index()
