@@ -58,6 +58,17 @@ RATING — HOW IT WORKS (Windows Explorer compatible):
     • JPEG: reads EXIF Rating tag first, falls back to XMP.
     • PNG:  reads XMP iTXt chunk.
 
+NEW — MOVE TO SCENE TAG:
+- Two new buttons: "Move to End of Tag" and "Move to Top of Tag".
+- Opens a dialog listing all scene tags currently in use.
+- Moves selected images to the chosen position within the tag group.
+- Tag groups are defined by contiguous images under the same scene tag.
+
+BUGFIX — SELECTION:
+- Fixed spurious multi-selection after drag/drop and move operations.
+- Clicking empty space now properly clears selection.
+- Selection state is cleanly reset after all list manipulation operations.
+
 REQUIREMENT: pip install piexif   (one-time, needed for JPEG EXIF writing)
 """
 import os
@@ -78,20 +89,6 @@ PADDING = 30
 
 # ──────────────────────────────────────────────────────────────────────────────
 #  Rating helpers — Windows Explorer compatible
-#
-#  Windows Explorer reads star ratings from JPEG files via EXIF tags:
-#    Tag 0x4746 (18246) = Rating        — SHORT, 0–5   (5 = five stars)
-#    Tag 0x4749 (18249) = RatingPercent — SHORT, 0–99  (99 = five stars)
-#
-#  Windows star ↔ RatingPercent mapping:
-#    0 stars → 0     1 star → 1     2 stars → 25
-#    3 stars → 50    4 stars → 75   5 stars → 99
-#
-#  For cross-app compatibility we ALSO write XMP with:
-#    xmp:Rating            (1-5, Adobe standard)
-#    MicrosoftPhoto:Rating (0-99, Windows namespace — Lightroom, Bridge, etc.)
-#
-#  After every write we call SHChangeNotify() so Explorer refreshes immediately.
 # ──────────────────────────────────────────────────────────────────────────────
 
 try:
@@ -100,7 +97,6 @@ try:
 except ImportError:
     _PIEXIF_AVAILABLE = False
 
-# Windows star → RatingPercent mapping
 _STAR_TO_PERCENT = {0: 0, 1: 1, 2: 25, 3: 50, 4: 75, 5: 99}
 
 _XMP_RATING_RE = re.compile(
@@ -111,35 +107,21 @@ _MS_RATING_RE = re.compile(
 )
 
 
-# ── Shell notification (forces Windows Explorer to refresh immediately) ────────
-
 def _notify_shell(path: str) -> None:
-    """
-    Tell the Windows Shell that a file's properties changed.
-    This makes Windows Explorer update the Rating column instantly —
-    no manual F5 or waiting for the Search Indexer.
-    Safe no-op on non-Windows platforms.
-    """
     if sys.platform != 'win32':
         return
     try:
         import ctypes
         shell32          = ctypes.windll.shell32
-        SHCNE_UPDATEITEM = 0x00002000   # a single item's properties changed
-        SHCNF_PATHW      = 0x0005       # path is a wide-char string
+        SHCNE_UPDATEITEM = 0x00002000
+        SHCNF_PATHW      = 0x0005
         abs_path         = ctypes.c_wchar_p(os.path.abspath(path))
         shell32.SHChangeNotify(SHCNE_UPDATEITEM, SHCNF_PATHW, abs_path, None)
     except Exception:
         pass
 
 
-# ── XMP packet builder ────────────────────────────────────────────────────────
-
 def _build_xmp_packet(rating_stars: int) -> bytes:
-    """
-    Return a UTF-8 XMP packet embedding both xmp:Rating (1-5) and
-    MicrosoftPhoto:Rating (0-99).  rating_stars=0 → tags omitted (removal).
-    """
     percent = _STAR_TO_PERCENT.get(rating_stars, 0)
     if rating_stars > 0:
         rating_block = (
@@ -165,18 +147,11 @@ def _build_xmp_packet(rating_stars: int) -> bytes:
     return xmp.encode('utf-8')
 
 
-# ── JPEG rating ───────────────────────────────────────────────────────────────
-
 _JPEG_XMP_MARKER  = b'http://ns.adobe.com/xap/1.0/\x00'
 _JPEG_EXIF_MARKER = b'Exif\x00\x00'
 
 
 def _jpeg_get_rating(path: str) -> int:
-    """
-    Read the rating from a JPEG.
-    Priority: EXIF 0x4746 → EXIF 0x4749 → XMP xmp:Rating → XMP MicrosoftPhoto:Rating
-    Returns 0 if absent/unreadable.
-    """
     if _PIEXIF_AVAILABLE:
         try:
             ed  = _piexif.load(path)
@@ -190,8 +165,6 @@ def _jpeg_get_rating(path: str) -> int:
                         return stars
         except Exception:
             pass
-
-    # Fallback: scan APP1 segments for XMP
     try:
         with open(path, 'rb') as f:
             data = f.read()
@@ -224,23 +197,6 @@ def _jpeg_get_rating(path: str) -> int:
 
 
 def _jpeg_set_rating(path: str, rating: int) -> bool:
-    """
-    Write rating into a JPEG file.
-
-    Step 1 — EXIF (piexif):
-      Load the file's existing EXIF directly, patch Rating + RatingPercent,
-      write back via piexif.insert().  All camera metadata is preserved.
-      If piexif is unavailable, a minimal fallback EXIF block is injected
-      via a raw byte-level pass.
-
-    Step 2 — XMP pass:
-      Re-read the (now EXIF-updated) file and rebuild the segment list,
-      replacing/removing the XMP APP1 segment.
-
-    Step 3 — SHChangeNotify():
-      Tell Windows Shell to refresh Explorer's Rating column immediately.
-    """
-    # ── Step 1a: patch EXIF via piexif (preserves all camera metadata) ───────
     exif_written = False
     if _PIEXIF_AVAILABLE:
         try:
@@ -259,7 +215,6 @@ def _jpeg_set_rating(path: str, rating: int) -> bool:
         except Exception:
             pass
 
-    # ── Step 1b: fallback minimal EXIF (when piexif not installed) ────────────
     if not exif_written:
         try:
             with open(path, 'rb') as f:
@@ -313,7 +268,6 @@ def _jpeg_set_rating(path: str, rating: int) -> bool:
         except Exception:
             pass
 
-    # ── Step 2: XMP pass — re-read file, patch/remove the XMP segment ─────────
     xmp_written = False
     try:
         with open(path, 'rb') as f:
@@ -371,8 +325,6 @@ def _jpeg_set_rating(path: str, rating: int) -> bool:
     return exif_written or xmp_written
 
 
-# ── PNG helpers ───────────────────────────────────────────────────────────────
-
 _PNG_SIG         = b'\x89PNG\r\n\x1a\n'
 _PNG_XMP_KEYWORD = b'XML:com.adobe.xmp'
 
@@ -383,7 +335,6 @@ def _png_make_chunk(chunk_type: bytes, data: bytes) -> bytes:
 
 
 def _png_get_rating(path: str) -> int:
-    """Read rating from a PNG iTXt chunk. Returns 0 if absent."""
     try:
         with open(path, 'rb') as f:
             data = f.read()
@@ -412,13 +363,6 @@ def _png_get_rating(path: str) -> int:
 
 
 def _png_set_rating(path: str, rating: int) -> bool:
-    """
-    Embed (or remove) rating in a PNG iTXt chunk.
-    Writes both xmp:Rating and MicrosoftPhoto:Rating in the XMP packet.
-    rating=0 removes the chunk entirely.
-    Calls SHChangeNotify() so Windows Explorer refreshes immediately.
-    Returns True on success.
-    """
     try:
         with open(path, 'rb') as f:
             data = f.read()
@@ -437,12 +381,10 @@ def _png_set_rating(path: str, rating: int) -> bool:
             ctype      = data[i+4:i+8]
             chunk_data = data[i+8:i+8+length]
 
-            # Skip existing XMP iTXt
             if ctype == b'iTXt' and chunk_data.startswith(_PNG_XMP_KEYWORD):
                 i += 12 + length
                 continue
 
-            # Inject before first IDAT
             if ctype == b'IDAT' and not injected:
                 if rating > 0:
                     xmp_bytes  = _build_xmp_packet(rating)
@@ -461,10 +403,7 @@ def _png_set_rating(path: str, rating: int) -> bool:
         return False
 
 
-# ── Public API ────────────────────────────────────────────────────────────────
-
 def get_image_rating(path: str) -> int:
-    """Return the rating (0–5) stored in the file, or 0 if none/unsupported."""
     ext = os.path.splitext(path)[1].lower()
     if ext in ('.jpg', '.jpeg'):
         return _jpeg_get_rating(path)
@@ -474,14 +413,6 @@ def get_image_rating(path: str) -> int:
 
 
 def set_image_rating(path: str, rating: int) -> bool:
-    """
-    Write rating to the file (0 = remove, 5 = five stars).
-    For JPEG: writes EXIF Rating/RatingPercent (Windows Explorer reads these natively)
-              AND XMP with xmp:Rating + MicrosoftPhoto:Rating (Adobe apps).
-              Calls SHChangeNotify so Explorer updates the Rating column instantly.
-    For PNG:  writes XMP with xmp:Rating + MicrosoftPhoto:Rating + SHChangeNotify.
-    Returns True if the write succeeded.
-    """
     ext = os.path.splitext(path)[1].lower()
     if ext in ('.jpg', '.jpeg'):
         return _jpeg_set_rating(path, rating)
@@ -492,21 +423,12 @@ def set_image_rating(path: str, rating: int) -> bool:
 
 # ──────────────────────────────────────────────────────────────────────────────
 #  Scene-tag helpers
-#
-#  The tag is stored as a plain UTF-8 string in:
-#    JPEG  — EXIF ImageDescription (tag 0x010E, ASCII) via piexif
-#            + XMP dc:description for cross-app visibility
-#    PNG   — XMP iTXt chunk, dc:description
-#
-#  Windows Explorer shows ImageDescription in the "Title" / "Comments" column.
-#  The tag is also visible in the Details pane (File → Properties → Details).
 # ──────────────────────────────────────────────────────────────────────────────
 
 _DC_DESC_RE = re.compile(
     r'<dc:description>\s*<rdf:Alt[^>]*>\s*<rdf:li[^>]*>(.*?)</rdf:li>',
     re.IGNORECASE | re.DOTALL
 )
-# Simpler fallback: plain dc:description text node
 _DC_DESC_PLAIN_RE = re.compile(
     r'<dc:description>(.*?)</dc:description>',
     re.IGNORECASE | re.DOTALL
@@ -514,10 +436,6 @@ _DC_DESC_PLAIN_RE = re.compile(
 
 
 def _build_xmp_packet_with_tag(rating_stars: int, tag_text: str) -> bytes:
-    """
-    Build an XMP packet that carries BOTH the rating fields AND dc:description.
-    Either or both may be absent (empty string / 0).
-    """
     pct = _STAR_TO_PERCENT.get(rating_stars, 0)
     rating_block = (
         f"      <xmp:Rating>{rating_stars}</xmp:Rating>\n"
@@ -550,7 +468,6 @@ def _build_xmp_packet_with_tag(rating_stars: int, tag_text: str) -> bytes:
 
 
 def _xmp_extract_tag(xmp_str: str) -> str:
-    """Extract dc:description text from an XMP string."""
     m = _DC_DESC_RE.search(xmp_str)
     if m:
         return m.group(1).strip()
@@ -561,7 +478,6 @@ def _xmp_extract_tag(xmp_str: str) -> str:
 
 
 def _xmp_extract_rating(xmp_str: str) -> int:
-    """Extract xmp:Rating from XMP string (fallback path)."""
     m = _XMP_RATING_RE.search(xmp_str)
     if m:
         return int(m.group(1))
@@ -574,10 +490,7 @@ def _xmp_extract_rating(xmp_str: str) -> int:
     return 0
 
 
-# ── JPEG tag helpers ──────────────────────────────────────────────────────────
-
 def _jpeg_read_xmp_str(path: str) -> str:
-    """Return the raw XMP string from a JPEG, or '' if absent."""
     try:
         with open(path, 'rb') as f:
             data = f.read()
@@ -601,14 +514,8 @@ def _jpeg_read_xmp_str(path: str) -> str:
 
 
 def get_image_tag(path: str) -> str:
-    """
-    Return the scene-tag string stored in the image, or '' if none.
-    JPEG: reads EXIF ImageDescription (tag 0x010E) first, falls back to XMP dc:description.
-    PNG:  reads XMP iTXt dc:description.
-    """
     ext = os.path.splitext(path)[1].lower()
     if ext in ('.jpg', '.jpeg'):
-        # 1. EXIF ImageDescription
         if _PIEXIF_AVAILABLE:
             try:
                 ed  = _piexif.load(path)
@@ -619,7 +526,6 @@ def get_image_tag(path: str) -> str:
                         return text
             except Exception:
                 pass
-        # 2. XMP dc:description
         xmp = _jpeg_read_xmp_str(path)
         if xmp:
             return _xmp_extract_tag(xmp)
@@ -647,16 +553,9 @@ def get_image_tag(path: str) -> str:
 
 
 def set_image_tag(path: str, tag_text: str) -> bool:
-    """
-    Write (or remove) a scene-tag string into the image metadata.
-    tag_text='' removes the tag.
-    Also preserves the existing rating so the XMP packet stays consistent.
-    Calls SHChangeNotify() so Windows Explorer refreshes immediately.
-    """
     ext = os.path.splitext(path)[1].lower()
 
     if ext in ('.jpg', '.jpeg'):
-        # ── Step 1: write EXIF ImageDescription via piexif ───────────────────
         if _PIEXIF_AVAILABLE:
             try:
                 try:
@@ -672,9 +571,7 @@ def set_image_tag(path: str, tag_text: str) -> bool:
             except Exception:
                 pass
 
-        # ── Step 2: rewrite XMP segment (preserving rating) ──────────────────
         try:
-            # Read current rating from EXIF so we can re-embed it
             current_rating = get_image_rating(path)
 
             with open(path, 'rb') as f:
@@ -798,21 +695,10 @@ class SmartLineEdit(QtWidgets.QLineEdit):
 # ──────────────────────────────────────────────────────────────────────────────
 
 class StarOverlay(QtWidgets.QWidget):
-    """
-    Floating star button rendered over a thumbnail cell in the list widget.
+    toggled = QtCore.pyqtSignal(bool)
 
-    Visual states:
-      • Starred (rating=5)  — solid gold ★
-      • Hovered unstarred   — semi-transparent gold ☆
-      • Normal unstarred    — very faint white ☆
-      • Unsupported format  — greyed out ☆ (no click)
-    """
-
-    toggled = QtCore.pyqtSignal(bool)   # emits new starred state
-
-    # Geometry constants (relative to thumbnail top-right corner)
-    _SIZE   = 22   # widget square size in px
-    _MARGIN =  4   # distance from top/right edges of the cell
+    _SIZE   = 22
+    _MARGIN =  4
 
     def __init__(self, parent, path: str, star_size: int = 22):
         super().__init__(parent)
@@ -829,11 +715,8 @@ class StarOverlay(QtWidgets.QWidget):
         self.setToolTip("☆ Click to mark as favourite (5-star rating)" if self._supported
                         else "Rating not supported for this file type")
 
-        # Read current rating from file
         if self._supported and os.path.exists(path):
             self._starred = (get_image_rating(path) == 5)
-
-    # ── public ────────────────────────────────────────────────────────────────
 
     def set_starred(self, state: bool):
         self._starred = state
@@ -843,15 +726,12 @@ class StarOverlay(QtWidgets.QWidget):
         return self._starred
 
     def update_path(self, path: str):
-        """Call this after a file rename to keep the overlay pointing at the right file."""
         self._path      = path
         self._supported = os.path.splitext(path)[1].lower() in XMP_SUPPORTED_EXT
         self.setCursor(Qt.PointingHandCursor if self._supported else Qt.ArrowCursor)
         if self._supported and os.path.exists(path):
             self._starred = (get_image_rating(path) == 5)
         self.update()
-
-    # ── events ────────────────────────────────────────────────────────────────
 
     def enterEvent(self, event):
         self._hovered = True
@@ -869,32 +749,27 @@ class StarOverlay(QtWidgets.QWidget):
                 self._starred = new_state
                 self.update()
                 self.toggled.emit(new_state)
-        event.accept()   # don't propagate to list widget
-
-    # ── painting ──────────────────────────────────────────────────────────────
+        event.accept()
 
     def paintEvent(self, event):
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
 
         s = self._size
-        # Semi-transparent dark circle background for legibility
         painter.setPen(Qt.NoPen)
         if self._starred or self._hovered:
             painter.setBrush(QtGui.QColor(0, 0, 0, 120))
             painter.drawEllipse(1, 1, s - 2, s - 2)
 
-        # Star colour
         if not self._supported:
             color = QtGui.QColor(160, 160, 160, 90)
         elif self._starred:
-            color = QtGui.QColor(255, 204, 0, 255)      # solid gold
+            color = QtGui.QColor(255, 204, 0, 255)
         elif self._hovered:
-            color = QtGui.QColor(255, 204, 0, 200)      # gold hover
+            color = QtGui.QColor(255, 204, 0, 200)
         else:
-            color = QtGui.QColor(255, 255, 255, 70)     # faint white
+            color = QtGui.QColor(255, 255, 255, 70)
 
-        # Draw star glyph using a QPainterPath (5-pointed star)
         path = self._star_path(s / 2, s / 2, s * 0.42, s * 0.18)
         painter.setBrush(color)
         painter.setPen(Qt.NoPen)
@@ -919,21 +794,11 @@ class StarOverlay(QtWidgets.QWidget):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-#  TagOverlay  — top-left corner badge; clicking opens the tag editor dialog
+#  TagOverlay
 # ──────────────────────────────────────────────────────────────────────────────
 
 class TagOverlay(QtWidgets.QWidget):
-    """
-    Floating 'T' badge rendered over the top-left corner of each thumbnail.
-
-    Visual states:
-      • Tagged     — solid cyan-teal badge with white T
-      • Hovered    — semi-bright badge, inviting a click
-      • No tag     — very faint, barely visible placeholder
-      • Unsupported format — greyed out, no click
-    """
-
-    tag_changed = QtCore.pyqtSignal(str)   # emits new tag text ('' = removed)
+    tag_changed = QtCore.pyqtSignal(str)
 
     def __init__(self, parent, path: str, size: int = 22):
         super().__init__(parent)
@@ -954,8 +819,6 @@ class TagOverlay(QtWidgets.QWidget):
         if self._supported and os.path.exists(path):
             self._tag = get_image_tag(path)
 
-    # ── public ────────────────────────────────────────────────────────────────
-
     def get_tag(self) -> str:
         return self._tag
 
@@ -970,8 +833,6 @@ class TagOverlay(QtWidgets.QWidget):
         if self._supported and os.path.exists(path):
             self._tag = get_image_tag(path)
         self.update()
-
-    # ── events ────────────────────────────────────────────────────────────────
 
     def enterEvent(self, event):
         self._hovered = True
@@ -1004,7 +865,6 @@ class TagOverlay(QtWidgets.QWidget):
         layout.setContentsMargins(18, 16, 18, 16)
         layout.setSpacing(10)
 
-        # Header
         header = QtWidgets.QLabel(
             f"<b style='color:#32ade6;font-size:13px;'>🏷  Scene Tag</b><br>"
             f"<span style='color:#636366;font-size:10px;'>"
@@ -1079,8 +939,6 @@ class TagOverlay(QtWidgets.QWidget):
                     self.update()
                     self.tag_changed.emit(new_tag)
 
-    # ── painting ──────────────────────────────────────────────────────────────
-
     def paintEvent(self, event):
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
@@ -1088,7 +946,6 @@ class TagOverlay(QtWidgets.QWidget):
         s    = self._size
         has  = bool(self._tag)
 
-        # Background pill
         painter.setPen(Qt.NoPen)
         if not self._supported:
             painter.setBrush(QtGui.QColor(80, 80, 80, 60))
@@ -1106,7 +963,6 @@ class TagOverlay(QtWidgets.QWidget):
         r = s * 0.30
         painter.drawRoundedRect(QtCore.QRectF(1, 1, s - 2, s - 2), r, r)
 
-        # 'T' glyph
         if not self._supported:
             t_color = QtGui.QColor(140, 140, 140, 80)
         elif has:
@@ -1129,7 +985,7 @@ class DragDropListWidget(QtWidgets.QListWidget):
     b_key_pressed            = QtCore.pyqtSignal(str)
     preview_path_changed     = QtCore.pyqtSignal(str)
     scene_tag_changed        = QtCore.pyqtSignal()
-    open_fullscreen_requested = QtCore.pyqtSignal(int)   # emits row index   # emitted when any tag is set/cleared
+    open_fullscreen_requested = QtCore.pyqtSignal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1153,7 +1009,6 @@ class DragDropListWidget(QtWidgets.QListWidget):
         self._rubber_banding    = False
         self._last_preview_path = None
 
-        # overlay dicts: row → overlay widget
         self._star_overlays: dict[int, StarOverlay] = {}
         self._tag_overlays:  dict[int, TagOverlay]  = {}
 
@@ -1164,11 +1019,8 @@ class DragDropListWidget(QtWidgets.QListWidget):
         self.progressive_timer.timeout.connect(self.resize_next_thumbnail)
         self.resize_index = 0
 
-        # Reposition overlays whenever scroll or layout changes
         self.verticalScrollBar().valueChanged.connect(self._reposition_overlays)
         self.horizontalScrollBar().valueChanged.connect(self._reposition_overlays)
-
-    # ── overlay size helpers ──────────────────────────────────────────────────
 
     def _star_size_for_thumb(self) -> int:
         return max(16, min(28, int(self.thumbnail_size * 0.16)))
@@ -1176,15 +1028,12 @@ class DragDropListWidget(QtWidgets.QListWidget):
     def _tag_size_for_thumb(self) -> int:
         return max(16, min(28, int(self.thumbnail_size * 0.16)))
 
-    # ── combined reposition ───────────────────────────────────────────────────
-
     def _reposition_overlays(self):
         for row in list(self._star_overlays.keys()):
             self._position_star(row)
         for row in list(self._tag_overlays.keys()):
             self._position_tag(row)
 
-    # alias kept for existing call sites
     def _reposition_stars(self):
         self._reposition_overlays()
 
@@ -1218,21 +1067,18 @@ class DragDropListWidget(QtWidgets.QListWidget):
         path_to_star = {s._path: s for s in self._star_overlays.values()}
         self._star_overlays.clear()
 
-        # Build a set of paths currently in the list
         current_paths = set()
         for i in range(self.count()):
             item = self.item(i)
             if item is not None:
                 current_paths.add(item.data(Qt.UserRole) or "")
 
-        # Destroy any overlay whose file is no longer in the list
         for path, star in list(path_to_star.items()):
             if path not in current_paths:
                 star.hide()
                 star.deleteLater()
                 del path_to_star[path]
 
-        # Re-map surviving overlays to their new row numbers
         for i in range(self.count()):
             item = self.item(i)
             if item is None:
@@ -1249,7 +1095,6 @@ class DragDropListWidget(QtWidgets.QListWidget):
                 self._position_star(i)
 
     def _on_star_toggled(self, row: int, state: bool):
-        # Notify parent organizer to refresh the filter if active
         parent = self.parent()
         while parent is not None:
             if hasattr(parent, '_favorites_filter_active'):
@@ -1284,7 +1129,6 @@ class DragDropListWidget(QtWidgets.QListWidget):
     # ── tag management ────────────────────────────────────────────────────────
 
     def add_tag_for_item(self, row: int):
-        """Create and position a TagOverlay for the item at *row*."""
         item = self.item(row)
         if item is None:
             return
@@ -1296,7 +1140,6 @@ class DragDropListWidget(QtWidgets.QListWidget):
         self._position_tag(row)
 
     def _position_tag(self, row: int):
-        """Move the TagOverlay for *row* to the top-LEFT corner of the cell."""
         tag = self._tag_overlays.get(row)
         if tag is None:
             return
@@ -1312,21 +1155,18 @@ class DragDropListWidget(QtWidgets.QListWidget):
         path_to_tag = {t._path: t for t in self._tag_overlays.values()}
         self._tag_overlays.clear()
 
-        # Build a set of paths currently in the list
         current_paths = set()
         for i in range(self.count()):
             item = self.item(i)
             if item is not None:
                 current_paths.add(item.data(Qt.UserRole) or "")
 
-        # Destroy any overlay whose file is no longer in the list
         for path, tov in list(path_to_tag.items()):
             if path not in current_paths:
                 tov.hide()
                 tov.deleteLater()
                 del path_to_tag[path]
 
-        # Re-map surviving overlays to their new row numbers
         for i in range(self.count()):
             item = self.item(i)
             if item is None:
@@ -1357,11 +1197,6 @@ class DragDropListWidget(QtWidgets.QListWidget):
                 break
 
     def get_active_scene_tag(self) -> str:
-        """
-        Return the scene tag that should be shown in the sticky banner.
-        This is the tag of the last tagged item whose top edge is at or above
-        the top of the currently visible viewport area.
-        """
         viewport_top = self.verticalScrollBar().value()
         best_tag     = ""
         best_row     = -1
@@ -1373,16 +1208,12 @@ class DragDropListWidget(QtWidgets.QListWidget):
             if item is None:
                 continue
             rect = self.visualItemRect(item)
-            # rect is in viewport coordinates; add scroll offset for absolute position
             item_top_abs = rect.top() + viewport_top
-            # Include items whose top is at/above the current viewport top
             if item_top_abs <= viewport_top + self.viewport().height() // 2:
                 if row > best_row:
                     best_row = row
                     best_tag = tag_text
         return best_tag
-
-    # ── combined clear (called on folder load) ────────────────────────────────
 
     def clear_overlays(self):
         self.clear_stars()
@@ -1398,7 +1229,7 @@ class DragDropListWidget(QtWidgets.QListWidget):
         super().scrollContentsBy(dx, dy)
         self._reposition_overlays()
 
-    # ── existing methods (unchanged) ──────────────────────────────────────────
+    # ── FIXED: mousePressEvent — clear spurious selections ────────────────────
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -1410,6 +1241,11 @@ class DragDropListWidget(QtWidgets.QListWidget):
                 if path:
                     self._last_preview_path = path
                     self.preview_path_changed.emit(path)
+            else:
+                # Clicked on empty space — clear selection unless modifier held
+                modifiers = event.modifiers()
+                if not (modifiers & Qt.ControlModifier or modifiers & Qt.ShiftModifier):
+                    self.clearSelection()
         elif event.button() == Qt.RightButton:
             item = self.itemAt(event.pos())
             if item:
@@ -1433,11 +1269,9 @@ class DragDropListWidget(QtWidgets.QListWidget):
         super().mouseMoveEvent(event)
 
     def keyPressEvent(self, event):
-        # S key: add 5-star rating to selected images (falls back to current row)
         if event.key() == Qt.Key_S:
             targets = self.selectedItems()
             if not targets:
-                # Nothing selected — act on whatever row has keyboard focus
                 row = self.currentRow()
                 if row >= 0:
                     item = self.item(row)
@@ -1451,7 +1285,6 @@ class DragDropListWidget(QtWidgets.QListWidget):
                         star.set_starred(True)
             event.accept()
             return
-        # D key: unstar selected images (falls back to current row)
         if event.key() == Qt.Key_D:
             targets = self.selectedItems()
             if not targets:
@@ -1468,7 +1301,6 @@ class DragDropListWidget(QtWidgets.QListWidget):
                         star.set_starred(False)
             event.accept()
             return
-        # G key: unstar ALL selected regardless of current star state
         if event.key() == Qt.Key_G:
             for item in self.selectedItems():
                 row  = self.row(item)
@@ -1478,7 +1310,6 @@ class DragDropListWidget(QtWidgets.QListWidget):
                         star.set_starred(False)
             event.accept()
             return
-        # T key: open tag dialog for the focused/selected thumbnail
         if event.key() == Qt.Key_T:
             sel = self.selectedItems()
             row = self.row(sel[0]) if sel else self.currentRow()
@@ -1488,7 +1319,6 @@ class DragDropListWidget(QtWidgets.QListWidget):
                     tov._open_tag_dialog()
             event.accept()
             return
-        # F key: open fullscreen viewer for current/selected image
         if event.key() == Qt.Key_F:
             sel = self.selectedItems()
             row = self.row(sel[0]) if sel else self.currentRow()
@@ -1496,7 +1326,6 @@ class DragDropListWidget(QtWidgets.QListWidget):
                 self.open_fullscreen_requested.emit(row)
             event.accept()
             return
-        # B key: copy selected image name (no ext) to base name field
         if event.key() == Qt.Key_B:
             sel = self.selectedItems()
             if sel:
@@ -1504,20 +1333,17 @@ class DragDropListWidget(QtWidgets.QListWidget):
                 self.b_key_pressed.emit(name_no_ext)
             event.accept()
             return
-        # Arrow keys: navigate thumbnails (skips hidden/filtered rows)
         if event.key() in (Qt.Key_Left, Qt.Key_Right):
             total = self.count()
             if total == 0:
                 return
             current_row = self.currentRow()
-            # If nothing is current, start from row 0
             if current_row < 0:
                 current_row = 0
                 self.setCurrentRow(0)
                 self.scrollToItem(self.item(0), QAbstractItemView.PositionAtCenter)
                 event.accept()
                 return
-            # Step through visible (non-hidden) rows
             step = -1 if event.key() == Qt.Key_Left else 1
             row  = current_row
             for _ in range(total):
@@ -1554,12 +1380,10 @@ class DragDropListWidget(QtWidgets.QListWidget):
         self.resize_index = 0
         self.resize_timer.stop()
         self.resize_timer.start(150)
-        # Resize star overlays
         new_star_sz = self._star_size_for_thumb()
         for star in self._star_overlays.values():
             star._size = new_star_sz
             star.setFixedSize(new_star_sz, new_star_sz)
-        # Resize tag overlays
         new_tag_sz = self._tag_size_for_thumb()
         for tov in self._tag_overlays.values():
             tov._size = new_tag_sz
@@ -1584,7 +1408,6 @@ class DragDropListWidget(QtWidgets.QListWidget):
         self.resize_index += 1
         if self.resize_index % 10 == 0:
             QApplication.processEvents()
-        # Keep stars on top after repainting
         QTimer.singleShot(0, self._reposition_overlays)
 
     def get_thumbnail_icon(self, path, force_regenerate=False):
@@ -1659,9 +1482,10 @@ class DragDropListWidget(QtWidgets.QListWidget):
         for r in reversed(sorted(drag_rows)):
             itm = self.takeItem(r)
             dragged_items.insert(0, itm)
+        # FIXED: use selectionModel().clearSelection() for clean state
+        self.selectionModel().clearSelection()
         for i, itm in enumerate(dragged_items):
             self.insertItem(insert_at + i, itm)
-        self.clearSelection()
         for i in range(len(dragged_items)):
             self.item(insert_at + i).setSelected(True)
         e.acceptProposedAction()
@@ -1671,32 +1495,10 @@ class DragDropListWidget(QtWidgets.QListWidget):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-
-# ──────────────────────────────────────────────────────────────────────────────
 #  FullscreenViewer
-#  ─ Opens as a true fullscreen window showing the selected image.
-#  ─ Bottom strip shows 5 film-strip thumbnails: prev2 | prev1 | CURRENT | next1 | next2
-#  ─ Keyboard:  ← → ↑ ↓  navigate    F  close    R  star    D  unstar    T  tag dialog
-#  ─ Clicking a strip thumbnail jumps to that image.
 # ──────────────────────────────────────────────────────────────────────────────
 
 class FullscreenViewer(QtWidgets.QWidget):
-    """
-    Fullscreen gallery viewer.
-
-    Bottom bar:
-      LEFT   — 3 equal-size buttons: ★/☆ Star toggle (R), 🏷 Tag (T), ✕ Close (F/Esc)
-               Star = gold when starred, dim when not.
-               Tag  = cyan when tagged, dim when not. No tag text shown here.
-               Close = always red.
-      CENTER — film-strip (5 cells)
-      RIGHT  — scene banner (like sticky bar in normal mode)
-               filename + counter below
-
-    Keys:  ← → ↑ ↓  navigate    R  toggle star    D  force unstar
-           T  tag dialog    F / Esc  close
-    """
-
     star_changed = QtCore.pyqtSignal(int, bool)
     tag_changed  = QtCore.pyqtSignal(int, str)
     row_changed  = QtCore.pyqtSignal(int)
@@ -1723,7 +1525,6 @@ class FullscreenViewer(QtWidgets.QWidget):
         self._img_label.setAlignment(Qt.AlignCenter)
         self._img_label.setStyleSheet("background: #000000; border: none;")
 
-        # Star overlay — top-right corner of the image area, 40% opacity
         self._star_overlay_lbl = QtWidgets.QLabel(self)
         self._star_overlay_lbl.setAlignment(Qt.AlignCenter)
         self._star_overlay_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
@@ -1743,7 +1544,6 @@ class FullscreenViewer(QtWidgets.QWidget):
         bar_layout.setContentsMargins(18, 8, 18, 8)
         bar_layout.setSpacing(16)
 
-        # ── LEFT: 3 uniform action buttons ───────────────────────────────────
         left_widget = QtWidgets.QWidget()
         left_widget.setStyleSheet("background: transparent; border: none;")
         left_widget.setFixedWidth(210)
@@ -1777,7 +1577,6 @@ class FullscreenViewer(QtWidgets.QWidget):
         """)
         self._close_btn.clicked.connect(self.close)
 
-        # Remove-to-folder button
         self._remove_btn = QtWidgets.QPushButton("\U0001f5d1  Remove  (R)")
         self._remove_btn.setFixedHeight(self._BTN_H)
         self._remove_btn.setFixedWidth(self._BTN_W)
@@ -1803,7 +1602,6 @@ class FullscreenViewer(QtWidgets.QWidget):
         left_vbox.addWidget(self._close_btn)
         left_vbox.addStretch()
 
-        # ── CENTER: film-strip ────────────────────────────────────────────────
         self._strip_cells = []
         strip_widget = QtWidgets.QWidget()
         strip_widget.setStyleSheet("background: transparent; border: none;")
@@ -1821,7 +1619,6 @@ class FullscreenViewer(QtWidgets.QWidget):
             self._strip_cells.append(cell)
             strip_hbox.addWidget(cell)
 
-        # ── RIGHT: scene banner + filename + counter ──────────────────────────
         right_widget = QtWidgets.QWidget()
         right_widget.setStyleSheet("background: transparent; border: none;")
         right_widget.setFixedWidth(220)
@@ -1862,8 +1659,6 @@ class FullscreenViewer(QtWidgets.QWidget):
 
         self._update_display()
 
-    # ── geometry ──────────────────────────────────────────────────────────────
-
     def showEvent(self, event):
         super().showEvent(event)
         screen = QtWidgets.QApplication.primaryScreen()
@@ -1882,13 +1677,9 @@ class FullscreenViewer(QtWidgets.QWidget):
         h = self.height()
         self._bar.setGeometry(0, h - self._BAR_H, w, self._BAR_H)
         self._img_label.setGeometry(0, 0, w, h - self._BAR_H)
-        # Star overlay: top-right corner of image area, 48×48
         self._star_overlay_lbl.setGeometry(w - 58, 14, 44, 44)
 
-    # ── navigation ────────────────────────────────────────────────────────────
-
     def _go(self, delta):
-        """Navigate by *delta* steps, skipping rows hidden by the favorites filter."""
         step    = 1 if delta > 0 else -1
         row     = self._row
         moved   = 0
@@ -1896,7 +1687,7 @@ class FullscreenViewer(QtWidgets.QWidget):
         while moved < target:
             row += step
             if row < 0 or row >= self._total:
-                return   # hit the boundary — stop
+                return
             item = self._list.item(row)
             if item is not None and not item.isHidden():
                 moved += 1
@@ -1906,7 +1697,6 @@ class FullscreenViewer(QtWidgets.QWidget):
             self._update_display()
 
     def _strip_clicked(self, offset):
-        """Click on a film-strip cell — jump directly to that row (filter skipping here too)."""
         step      = 1 if offset > 0 else -1
         row       = self._row
         remaining = abs(offset)
@@ -1922,8 +1712,6 @@ class FullscreenViewer(QtWidgets.QWidget):
             self.row_changed.emit(self._row)
             self._update_display()
 
-    # ── sync helpers (in-memory overlays are source of truth) ─────────────────
-
     def _get_current_tag(self, path):
         tov = self._list._tag_overlays.get(self._row)
         if tov is not None:
@@ -1937,14 +1725,11 @@ class FullscreenViewer(QtWidgets.QWidget):
         return get_image_rating(path) == 5
 
     def _get_active_scene_tag(self):
-        """Walk backward from current row to find the nearest tagged image."""
         for row in range(self._row, -1, -1):
             tov = self._list._tag_overlays.get(row)
             if tov and tov.get_tag():
                 return tov.get_tag()
         return ""
-
-    # ── display ───────────────────────────────────────────────────────────────
 
     def _update_display(self):
         item = self._list.item(self._row)
@@ -1952,7 +1737,6 @@ class FullscreenViewer(QtWidgets.QWidget):
             return
         path = item.data(Qt.UserRole) or ""
 
-        # Main image
         if os.path.exists(path):
             pix = QtGui.QPixmap(path)
             if not pix.isNull():
@@ -1962,14 +1746,11 @@ class FullscreenViewer(QtWidgets.QWidget):
                     self._img_label.setPixmap(
                         pix.scaled(aw, ah, Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
-        # RIGHT: scene banner
         scene_tag = self._get_active_scene_tag()
         self._scene_banner_lbl.setText(f"\U0001f3f7\ufe0f  {scene_tag}" if scene_tag else "")
-        # RIGHT: filename + counter
         self._name_label.setText(os.path.basename(path))
         self._meta_label.setText(f"{self._row + 1}  /  {self._total}")
 
-        # LEFT: star button
         bh = self._BTN_H
         is_starred = self._get_current_starred(path)
         if is_starred:
@@ -1996,7 +1777,6 @@ class FullscreenViewer(QtWidgets.QWidget):
                 QPushButton:pressed {{ background: #1a1400; }}
             """)
 
-        # LEFT: tag button
         has_tag = bool(self._get_current_tag(path))
         if has_tag:
             self._tag_btn.setText("\U0001f3f7  Tagged  (T)")
@@ -2022,22 +1802,18 @@ class FullscreenViewer(QtWidgets.QWidget):
                 QPushButton:pressed {{ background: #061422; }}
             """)
 
-        # Star overlay top-right (mirrors StarOverlay from normal mode, 40% opacity)
         is_starred_for_overlay = self._get_current_starred(path)
         if is_starred_for_overlay:
-            # Solid gold star at 40% opacity via rgba background trick
             self._star_overlay_lbl.setText("★")
             self._star_overlay_lbl.setStyleSheet(
                 "background: transparent; border: none; font-size: 26px; "
-                "color: rgba(255, 204, 0, 255);")   # 102/255 ≈ 40%
+                "color: rgba(255, 204, 0, 255);")
         else:
-            # Faint white hollow star — same as the unstarred state in StarOverlay
             self._star_overlay_lbl.setText("☆")
             self._star_overlay_lbl.setStyleSheet(
                 "background: transparent; border: none; font-size: 26px; "
-                "color: rgba(255, 255, 255, 40);")   # very faint
+                "color: rgba(255, 255, 255, 40);")
 
-        # Film-strip
         for idx, cell in enumerate(self._strip_cells):
             offset    = idx - 2
             row       = self._row + offset
@@ -2075,10 +1851,7 @@ class FullscreenViewer(QtWidgets.QWidget):
         self._thumb_cache[row] = thumb
         return thumb
 
-    # ── actions ───────────────────────────────────────────────────────────────
-
     def _toggle_star(self):
-        """S — add 5-star rating only (never removes; use D to remove)."""
         item = self._list.item(self._row)
         if item is None:
             return
@@ -2086,7 +1859,7 @@ class FullscreenViewer(QtWidgets.QWidget):
         if os.path.splitext(path)[1].lower() not in XMP_SUPPORTED_EXT:
             return
         if self._get_current_starred(path):
-            return  # S only adds, never removes
+            return
         if set_image_rating(path, 5):
             star = self._list._star_overlays.get(self._row)
             if star:
@@ -2095,7 +1868,6 @@ class FullscreenViewer(QtWidgets.QWidget):
             self._update_display()
 
     def _do_unstar(self):
-        """D — force remove star."""
         item = self._list.item(self._row)
         if item is None:
             return
@@ -2112,12 +1884,6 @@ class FullscreenViewer(QtWidgets.QWidget):
             self._update_display()
 
     def _remove_image(self):
-        """
-        R — Move the current image to  <open_folder>/00_removed/  then
-        remove it from the thumbnail list immediately.
-        Navigates to the next image (or previous if at the end).
-        Stays in fullscreen; no disruptive popup on success.
-        """
         item = self._list.item(self._row)
         if item is None:
             return
@@ -2131,7 +1897,6 @@ class FullscreenViewer(QtWidgets.QWidget):
         try:
             os.makedirs(dest_dir, exist_ok=True)
         except Exception as e:
-            # Show error but keep fullscreen open (parent=self keeps it on top)
             QtWidgets.QMessageBox(
                 QtWidgets.QMessageBox.Critical, "Error",
                 f"Could not create folder:\n{dest_dir}\n\n{e}",
@@ -2156,7 +1921,6 @@ class FullscreenViewer(QtWidgets.QWidget):
                 QtWidgets.QMessageBox.Ok, self).exec_()
             return
 
-        # Remove from list + clean up overlays
         row  = self._row
         star = self._list._star_overlays.pop(row, None)
         if star:
@@ -2169,7 +1933,6 @@ class FullscreenViewer(QtWidgets.QWidget):
         self._list._rebuild_tag_index()
         QTimer.singleShot(50, self._list._reposition_overlays)
 
-        # Update total and navigate — stay in fullscreen
         self._total = self._list.count()
         if self._total == 0:
             self.close()
@@ -2179,7 +1942,7 @@ class FullscreenViewer(QtWidgets.QWidget):
             self._row = self._total - 1
         self.row_changed.emit(self._row)
         self._update_display()
-        self.raise_()           # keep fullscreen on top
+        self.raise_()
         self.activateWindow()
 
     def _open_tag_dialog(self):
@@ -2247,8 +2010,6 @@ class FullscreenViewer(QtWidgets.QWidget):
                         tov.set_tag(new_tag)
                     self.tag_changed.emit(self._row, new_tag)
                     self._update_display()
-
-    # ── events ────────────────────────────────────────────────────────────────
 
     def keyPressEvent(self, event):
         k = event.key()
@@ -2354,6 +2115,16 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             QPushButton:hover   { background: #0066CC; }
             QPushButton:pressed { background: #0051A3; }
         """
+        # Tag-move button style (teal/cyan accent to match tag theme)
+        tag_move_btn_style = """
+            QPushButton {
+                padding: 4px 10px; font-weight: 600; font-size: 11px;
+                border-radius: 5px; margin: 1px 0;
+                background: #0a2a3a; color: #32ade6; border: 1px solid #1a5a80;
+            }
+            QPushButton:hover   { background: #1a3a5a; color: #5bc8f5; border-color: #2a80c0; }
+            QPushButton:pressed { background: #061422; }
+        """
 
         open_btn = QtWidgets.QPushButton("Open Folder")
         open_btn.setStyleSheet(blue_btn_style)
@@ -2375,6 +2146,24 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         bottom_btn.setFixedHeight(26)
         bottom_btn.clicked.connect(self.move_to_bottom)
 
+        # ── NEW: Move to Tag buttons ──────────────────────────────────────────
+        move_tag_end_btn = QtWidgets.QPushButton("🏷  Move Selected to End of Tag")
+        move_tag_end_btn.setStyleSheet(tag_move_btn_style)
+        move_tag_end_btn.setFixedHeight(26)
+        move_tag_end_btn.setToolTip(
+            "Move selected images to the END of a chosen scene-tag group.\n"
+            "Opens a dialog to pick the target tag.")
+        move_tag_end_btn.clicked.connect(lambda: self._move_to_tag(position='end'))
+
+        move_tag_top_btn = QtWidgets.QPushButton("🏷  Move Selected to Top of Tag")
+        move_tag_top_btn.setStyleSheet(tag_move_btn_style)
+        move_tag_top_btn.setFixedHeight(26)
+        move_tag_top_btn.setToolTip(
+            "Move selected images to the TOP of a chosen scene-tag group\n"
+            "(right after the tag marker image).\n"
+            "Opens a dialog to pick the target tag.")
+        move_tag_top_btn.clicked.connect(lambda: self._move_to_tag(position='top'))
+
         self.rename_all_btn = QtWidgets.QPushButton("Rename All")
         self.rename_all_btn.setStyleSheet(blue_btn_style)
         self.rename_all_btn.setFixedHeight(26)
@@ -2390,7 +2179,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.rename_options_frame.setStyleSheet("""
             QFrame { background: #2c2c2e; border: 1px solid #3a3a3c; border-radius: 8px; }
         """)
-        rename_options_frame = self.rename_options_frame   # local alias for layout building
+        rename_options_frame = self.rename_options_frame
         rename_options_layout = QtWidgets.QVBoxLayout(self.rename_options_frame)
         rename_options_layout.setContentsMargins(10, 6, 10, 6)
         rename_options_layout.setSpacing(4)
@@ -2644,7 +2433,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         inner_layout.setContentsMargins(0, 0, 6, 0)
 
         # ── Rename lock toggle ────────────────────────────────────────────────
-        # Default: renaming is LOCKED (safe). Must be explicitly unlocked.
         self._rename_unlocked = False
         self._rename_lock_btn = QtWidgets.QPushButton("🔒  Renaming Locked  (Safe)")
         self._rename_lock_btn.setFixedHeight(28)
@@ -2667,13 +2455,14 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         inner_layout.addWidget(reload_btn)
         inner_layout.addWidget(top_btn)
         inner_layout.addWidget(bottom_btn)
+        inner_layout.addWidget(move_tag_end_btn)
+        inner_layout.addWidget(move_tag_top_btn)
         inner_layout.addSpacing(2)
         inner_layout.addWidget(self._rename_lock_btn)
         inner_layout.addWidget(self.rename_all_btn)
         inner_layout.addWidget(self.rename_selected_btn)
         inner_layout.addWidget(self.rename_options_frame)
 
-        # Disable all rename controls on startup (locked by default)
         self.rename_all_btn.setEnabled(False)
         self.rename_selected_btn.setEnabled(False)
         self.rename_options_frame.setEnabled(False)
@@ -2802,7 +2591,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.list.verticalScrollBar().valueChanged.connect(self._update_scene_banner)
         self.list.open_fullscreen_requested.connect(self._open_fullscreen)
 
-        # ── Scene banner (sticky tag line above thumbnails) ───────────────────
+        # ── Scene banner ─────────────────────────────────────────────────────
         self.scene_banner = QtWidgets.QWidget()
         self.scene_banner.setFixedHeight(32)
         self.scene_banner.setStyleSheet("""
@@ -2844,7 +2633,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         banner_layout.addWidget(banner_icon)
         banner_layout.addWidget(self.scene_banner_label, 1)
 
-        # ── Colored keyboard hint bar (between scene banner and thumbnails) ───
+        # ── Colored keyboard hint bar ─────────────────────────────────────────
         hint_bar = QtWidgets.QWidget()
         hint_bar.setFixedHeight(24)
         hint_bar.setStyleSheet(
@@ -2865,32 +2654,25 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             s.setStyleSheet("background: transparent; border: none;")
             return s
 
-        # ★  Add Star — (S)
         hint_bar_layout.addWidget(_hint_lbl("★", "#c8980a"))
         hint_bar_layout.addWidget(_hint_lbl(" Add Star — (S)", "#8a7030"))
         hint_bar_layout.addWidget(_sep())
-        # ☆  Remove Star — (D)
         hint_bar_layout.addWidget(_hint_lbl("☆", "#505058"))
         hint_bar_layout.addWidget(_hint_lbl(" Remove Star — (D)", "#404048"))
         hint_bar_layout.addWidget(_sep())
-        # 🏷  Add Tag — (T)
         hint_bar_layout.addWidget(_hint_lbl("🏷", "#1a7aaa"))
         hint_bar_layout.addWidget(_hint_lbl(" Add Tag — (T)", "#1a5a80"))
         hint_bar_layout.addWidget(_sep())
-        # ⛶  Fullscreen — (F)
         hint_bar_layout.addWidget(_hint_lbl("⛶", "#208050"))
         hint_bar_layout.addWidget(_hint_lbl(" Fullscreen — (F)", "#186040"))
         hint_bar_layout.addWidget(_sep())
-        # ✎  Base Name — (B / Right-click)
         hint_bar_layout.addWidget(_hint_lbl("✎", "#2a6a5a"))
         hint_bar_layout.addWidget(_hint_lbl(" Base Name — (B / Right-click)", "#1e4a40"))
         hint_bar_layout.addWidget(_sep())
-        # ◀ ▶  Navigate
         hint_bar_layout.addWidget(_hint_lbl("◀ ▶", "#304060"))
         hint_bar_layout.addWidget(_hint_lbl(" Navigate", "#253050"))
         hint_bar_layout.addStretch()
 
-        # ★ Favorites filter toggle — right side of hint bar
         self._favorites_filter_active = False
         self._fav_filter_btn = QtWidgets.QPushButton("★  Show Favorites Only")
         self._fav_filter_btn.setFixedHeight(18)
@@ -2912,7 +2694,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         hint_bar_layout.addWidget(self._fav_filter_btn)
         hint_bar_layout.addSpacing(6)
 
-        # Right-side container: scene banner → hint bar → thumbnail list
         right_container = QtWidgets.QWidget()
         right_vbox = QtWidgets.QVBoxLayout(right_container)
         right_vbox.setContentsMargins(0, 0, 0, 0)
@@ -2939,18 +2720,11 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.folder_watch_timer.start(5000)
 
         self.show()
-        # Apply locked visual after window is shown so styles render immediately
         self._apply_rename_lock_visual()
 
-    # ── Global key handler (F = fullscreen from anywhere) ─────────────────────
+    # ── Global key handler ────────────────────────────────────────────────────
 
     def keyPressEvent(self, event):
-        """
-        Catch key presses at the main-window level.
-        S / D are forwarded to the thumbnail list so they work even when a
-        button or other widget has focus (not the list itself).
-        F toggles fullscreen (skipped when a text input has focus).
-        """
         focused = QtWidgets.QApplication.focusWidget()
         in_text = isinstance(focused, (QtWidgets.QLineEdit, QtWidgets.QSpinBox,
                                        QtWidgets.QAbstractSpinBox))
@@ -2970,8 +2744,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             event.accept()
             return
 
-        # Forward S / D to the list widget regardless of which widget has focus,
-        # unless a text input is focused (where S/D are normal characters).
         if event.key() in (Qt.Key_S, Qt.Key_D) and not in_text:
             self.list.keyPressEvent(event)
             return
@@ -2979,51 +2751,29 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         super().keyPressEvent(event)
 
     def _update_scene_banner(self):
-        """
-        Update the sticky scene-tag banner above the thumbnail grid.
-
-        Works like the PyCharm function breadcrumb: the banner always shows the
-        tag of the last tagged image that has scrolled into or above the visible
-        area — and it stays shown until a newer tag scrolls in from below.
-
-        Approach: scan every item's visualItemRect (which is in viewport
-        coordinates and is always correct regardless of image size or spacing),
-        find the topmost item that is at least partially visible, then walk
-        backward from that row to find the nearest tag at or above it.
-        This is robust for mixed-size images, large images, and empty gaps.
-        """
         if self.list.count() == 0:
             self._set_banner_text("", "— no scene tag —")
             return
 
         vp_height   = self.list.viewport().height()
         top_row     = -1
-        top_y       = vp_height + 1   # start with a value beyond the viewport
+        top_y       = vp_height + 1
 
         for i in range(self.list.count()):
             item = self.list.item(i)
             if item is None:
                 continue
             rect = self.list.visualItemRect(item)
-            # An item is "at least partially visible" if its bottom is above
-            # the viewport bottom AND its top is above the viewport height.
-            # We want the one whose top edge is closest to (but still within) 0.
             if rect.bottom() < 0:
-                # Entirely above the viewport — this is a candidate for top_row
-                # because it represents where we "came from"; keep the last such row.
                 top_row = i
             elif rect.top() < vp_height:
-                # At least partially visible from the top
                 if top_row == -1:
-                    # No fully-scrolled-past item yet — this is the first visible row
                     top_row = i
-                break   # first partially/fully visible item found; stop scanning
+                break
 
-        # If everything is scrolled past the bottom (shouldn't happen), use last row
         if top_row == -1:
             top_row = self.list.count() - 1
 
-        # Walk backward from top_row to find the nearest tag at or above
         active_tag = ""
         for row in range(top_row, -1, -1):
             tov = self.list._tag_overlays.get(row)
@@ -3034,7 +2784,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self._set_banner_text(active_tag)
 
     def _set_banner_text(self, tag: str, override: str = ""):
-        """Helper — updates the banner label text and style."""
         if tag:
             self.scene_banner_label.setText(f"  {tag}")
             self.scene_banner_label.setStyleSheet("""
@@ -3058,17 +2807,10 @@ class ImageOrganizer(QtWidgets.QMainWindow):
     # ── Favorites filter ──────────────────────────────────────────────────────
 
     def _toggle_favorites_filter(self):
-        """Toggle showing only starred images in the thumbnail grid."""
         self._favorites_filter_active = self._fav_filter_btn.isChecked()
         self._apply_favorites_filter()
 
     def _apply_favorites_filter(self):
-        """
-        Show/hide thumbnails based on the favorites filter state.
-        When active: only starred images are visible.
-        When inactive: all images are visible.
-        Also updates overlays and the scene banner after applying.
-        """
         active = self._favorites_filter_active
         for i in range(self.list.count()):
             item = self.list.item(i)
@@ -3081,25 +2823,15 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             else:
                 item.setHidden(False)
 
-        # Reposition overlays since visibility changed
         QTimer.singleShot(30, self.list._reposition_overlays)
         QTimer.singleShot(60, self._update_scene_banner)
 
     # ── Fullscreen viewer ─────────────────────────────────────────────────────
 
     def _open_fullscreen(self, start_row: int):
-        """
-        Open (or reuse) the fullscreen gallery viewer at *start_row*.
-
-        Only one fullscreen window exists at a time.  If one is already open,
-        navigate it to *start_row* and bring it to front instead of opening
-        a second window.  Pressing F when the viewer is already showing will
-        close it (handled in keyPressEvent via _close_fullscreen_if_open).
-        """
         if self.list.count() == 0:
             return
 
-        # Reuse existing viewer if already open
         if hasattr(self, '_viewer') and self._viewer is not None:
             try:
                 self._viewer._row = start_row
@@ -3108,7 +2840,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                 self._viewer.activateWindow()
                 return
             except RuntimeError:
-                self._viewer = None   # viewer was deleted
+                self._viewer = None
 
         viewer = FullscreenViewer(self.list, start_row, parent=None)
         viewer.row_changed.connect(self._on_fullscreen_row_changed)
@@ -3117,16 +2849,11 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         viewer.setAttribute(Qt.WA_DeleteOnClose, True)
         viewer.destroyed.connect(self._on_fullscreen_closed)
         self._viewer = viewer
-        self._last_fullscreen_row = start_row   # seed for close restore
+        self._last_fullscreen_row = start_row
         viewer.showFullScreen()
         viewer.setFocus()
 
     def _on_fullscreen_closed(self):
-        """
-        Called when the fullscreen viewer is destroyed.
-        Restores focus and selection to the last row viewed in fullscreen
-        so arrow keys work immediately without needing a mouse click.
-        """
         last_row = getattr(self, '_last_fullscreen_row', -1)
         self._viewer = None
         self.list.setFocus()
@@ -3136,7 +2863,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                 self.list.setCurrentRow(last_row)
                 self.list.scrollToItem(item, QAbstractItemView.PositionAtCenter)
             else:
-                # Last row is hidden (filtered) — pick nearest visible row
                 for r in range(last_row, -1, -1):
                     it = self.list.item(r)
                     if it and not it.isHidden():
@@ -3147,7 +2873,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             self.list.setCurrentRow(0)
 
     def _close_fullscreen_if_open(self):
-        """Close the fullscreen viewer if it is currently open."""
         if hasattr(self, '_viewer') and self._viewer is not None:
             try:
                 self._viewer.close()
@@ -3156,16 +2881,14 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             self._viewer = None
 
     def _on_fullscreen_row_changed(self, row: int):
-        """Keep the thumbnail grid and normal preview in sync with fullscreen navigation."""
-        self._last_fullscreen_row = row   # remember for focus restore on close
+        self._last_fullscreen_row = row
         if 0 <= row < self.list.count():
-            self.list.clearSelection()
+            self.list.selectionModel().clearSelection()
             item = self.list.item(row)
             if item:
                 item.setSelected(True)
                 self.list.setCurrentRow(row)
                 self.list.scrollToItem(item, QAbstractItemView.PositionAtCenter)
-                # Also update the normal preview panel
                 path = item.data(Qt.UserRole)
                 if path and os.path.exists(path):
                     pix = QtGui.QPixmap(path)
@@ -3176,37 +2899,27 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                         self.preview.setPixmap(scaled)
 
     def _on_fullscreen_star_changed(self, row: int, starred: bool):
-        """Star overlay in main grid already updated by FullscreenViewer; refresh banner and filter."""
         self._update_scene_banner()
         if self._favorites_filter_active:
             self._apply_favorites_filter()
 
     def _on_fullscreen_tag_changed(self, row: int, tag_text: str):
-        """Tag overlay in main grid already updated by FullscreenViewer; refresh banner."""
         self._update_scene_banner()
 
     # ── Rename lock ───────────────────────────────────────────────────────────
 
     def _toggle_rename_lock(self):
-        """
-        Toggle the rename lock.
-        Locked (default): all rename controls are visually dimmed and disabled.
-        Unlocked: controls are fully visible and active.
-        """
         self._rename_unlocked = not self._rename_unlocked
         self._apply_rename_lock_visual()
 
     def _apply_rename_lock_visual(self):
-        """Apply visual state for the current rename lock setting."""
         enabled = self._rename_unlocked
 
-        # Enable / disable interactivity
         self.rename_all_btn.setEnabled(enabled)
         self.rename_selected_btn.setEnabled(enabled)
         self.rename_options_frame.setEnabled(enabled)
         self.renumber_btn.setEnabled(enabled)
 
-        # Dimmed style — clearly visible but obviously inactive (medium grey)
         _dim_btn = """
             QPushButton {
                 padding: 4px 10px; font-weight: 600; font-size: 11px;
@@ -3415,8 +3128,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
     def load_folder_contents(self):
         if not self.folder:
             return
-        # Generation counter: if open_folder is called again while loading,
-        # the old loop sees its generation is stale and stops immediately.
         if not hasattr(self, '_load_gen'):
             self._load_gen = 0
         self._load_gen += 1
@@ -3424,7 +3135,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
 
         self._progress_start()
         QApplication.processEvents()
-        # Reset favorites filter on new folder load
         self._favorites_filter_active = False
         self._fav_filter_btn.setChecked(False)
         self.list.clear_overlays()
@@ -3435,7 +3145,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         files.sort(key=natural_key)
         total_files = len(files)
         for idx, f in enumerate(files):
-            # Abort if a newer load has started (new folder selected mid-load)
             if self._load_gen != my_gen:
                 return
             path = os.path.join(self.folder, f)
@@ -3448,13 +3157,11 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             progress = int(((idx + 1) / total_files) * 100) if total_files > 0 else 100
             self.progress_bar.setValue(progress)
             QApplication.processEvents()
-        # Final check: if superseded, leave without updating state
         if self._load_gen != my_gen:
             return
         self._progress_done()
         QTimer.singleShot(100, self.list._reposition_overlays)
         QTimer.singleShot(150, self._update_scene_banner)
-        # Auto-select and focus the first item so arrow keys work immediately
         if self.list.count() > 0:
             self.list.setCurrentRow(0)
             self.list.setFocus()
@@ -3490,9 +3197,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             self.list._rebuild_tag_index()
             self.current_folder_files = current_files
 
-            # Show the "images removed" dialog.
-            # If fullscreen is open, parent the dialog to the viewer so it
-            # appears on top of it — user can confirm without leaving fullscreen.
             fullscreen_open = hasattr(self, '_viewer') and self._viewer is not None
             try:
                 dialog_parent = self._viewer if fullscreen_open else self
@@ -3547,7 +3251,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             dlg_layout.addLayout(btn_row_layout)
             dialog.exec_()
 
-            # After dialog closes, re-raise fullscreen if it was open
             if fullscreen_open:
                 try:
                     self._viewer.raise_()
@@ -3736,6 +3439,8 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.list.setUpdatesEnabled(False)
         for item in reversed(items):
             self.list.takeItem(self.list.row(item))
+        # FIXED: use selectionModel().clearSelection() for clean state
+        self.list.selectionModel().clearSelection()
         for i, item in enumerate(items):
             self.list.insertItem(i, item)
             item.setSelected(True)
@@ -3752,6 +3457,8 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.list.setUpdatesEnabled(False)
         for item in reversed(items):
             self.list.takeItem(self.list.row(item))
+        # FIXED: use selectionModel().clearSelection() for clean state
+        self.list.selectionModel().clearSelection()
         base = self.list.count()
         for i, item in enumerate(items):
             self.list.insertItem(base + i, item)
@@ -3761,6 +3468,255 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.list._rebuild_star_index()
         self.list._rebuild_tag_index()
         QTimer.singleShot(50, self.list._reposition_overlays)
+
+    # ── NEW: Move to Tag ──────────────────────────────────────────────────────
+
+    def _get_tag_groups(self):
+        """
+        Scan all tag overlays and return a list of tag groups, ordered by row.
+
+        Each group is a dict:
+          {
+            'tag':       str,   # the tag text
+            'tag_row':   int,   # row of the tagged image (scene marker)
+            'start':     int,   # first row in the group (= tag_row)
+            'end':       int,   # last row in the group (inclusive)
+          }
+
+        A tag group starts at the tagged image and extends until the row
+        before the next tagged image (or end of list).
+        """
+        total = self.list.count()
+        if total == 0:
+            return []
+
+        # Collect all rows that have a non-empty tag, sorted by row
+        tagged_rows = []
+        for row, tov in sorted(self.list._tag_overlays.items()):
+            tag_text = tov.get_tag()
+            if tag_text:
+                tagged_rows.append((row, tag_text))
+
+        if not tagged_rows:
+            return []
+
+        groups = []
+        for i, (row, tag_text) in enumerate(tagged_rows):
+            start = row
+            if i + 1 < len(tagged_rows):
+                end = tagged_rows[i + 1][0] - 1
+            else:
+                end = total - 1
+            groups.append({
+                'tag':     tag_text,
+                'tag_row': row,
+                'start':   start,
+                'end':     end,
+            })
+
+        return groups
+
+    def _move_to_tag(self, position='end'):
+        """
+        Move selected images to the top or end of a chosen tag group.
+
+        position='end'  → insert after the last image in the tag group.
+        position='top'  → insert right after the tag marker image.
+
+        Opens a dialog listing all available scene tags. The user picks one
+        and the selected thumbnails are moved there.
+        """
+        sel = self.list.selectedItems()
+        if not sel:
+            QtWidgets.QMessageBox.warning(
+                self, "No Selection", "Please select at least one image first.")
+            return
+
+        groups = self._get_tag_groups()
+        if not groups:
+            QtWidgets.QMessageBox.information(
+                self, "No Tags",
+                "There are no scene tags in the current list.\n\n"
+                "Select a thumbnail and press T to add a scene tag first.")
+            return
+
+        # Build dialog
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle(
+            "Move to End of Tag" if position == 'end' else "Move to Top of Tag")
+        dlg.setMinimumWidth(420)
+        dlg.setStyleSheet("""
+            QDialog   { background: #1c1c1e; color: #e0e0e0; }
+            QLabel    { color: #a0a0a0; font-size: 11px; background: transparent; border: none; }
+        """)
+        layout = QtWidgets.QVBoxLayout(dlg)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(10)
+
+        pos_label = "end" if position == 'end' else "top (right after the tag marker)"
+        header = QtWidgets.QLabel(
+            f"<b style='color:#32ade6;font-size:13px;'>🏷  Move "
+            f"{len(sel)} image{'s' if len(sel) != 1 else ''} "
+            f"to {pos_label} of tag:</b>")
+        header.setTextFormat(Qt.RichText)
+        header.setWordWrap(True)
+        layout.addWidget(header)
+
+        hint = QtWidgets.QLabel(
+            "Select a scene tag below. The selected images will be moved "
+            f"to the {'end' if position == 'end' else 'beginning'} of that "
+            "tag's group in the thumbnail list.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #636366; font-size: 10px; background: transparent; border: none;")
+        layout.addWidget(hint)
+
+        # Tag list
+        tag_list = QtWidgets.QListWidget()
+        tag_list.setStyleSheet("""
+            QListWidget {
+                background: #2c2c2e; border: 1px solid #3a3a3c;
+                border-radius: 6px; color: #e0e0e0; font-size: 12px; padding: 4px;
+                outline: none;
+            }
+            QListWidget::item {
+                padding: 6px 10px; border-radius: 4px;
+            }
+            QListWidget::item:selected {
+                background: #0a2a3a; color: #32ade6; border: 1px solid #1a5a80;
+            }
+            QListWidget::item:hover {
+                background: #2a2a2e;
+            }
+            QScrollBar:vertical { background: #2c2c2e; width: 8px; border-radius: 4px; }
+            QScrollBar::handle:vertical {
+                background: #3a3a3c; border-radius: 4px; min-height: 20px; }
+            QScrollBar::handle:vertical:hover { background: #0066CC; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+        """)
+        tag_list.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+
+        for g in groups:
+            count = g['end'] - g['start'] + 1
+            display = f"🏷  {g['tag']}   ({count} image{'s' if count != 1 else ''})"
+            list_item = QtWidgets.QListWidgetItem(display)
+            list_item.setData(Qt.UserRole, g)
+            tag_list.addItem(list_item)
+
+        if tag_list.count() > 0:
+            tag_list.setCurrentRow(0)
+
+        layout.addWidget(tag_list)
+
+        # Buttons
+        btn_row = QtWidgets.QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        cancel_btn = QtWidgets.QPushButton("Cancel")
+        cancel_btn.setFixedHeight(30)
+        cancel_btn.setStyleSheet("""
+            QPushButton {
+                background: #3a3a3c; color: #e0e0e0; border: none;
+                border-radius: 6px; font-weight: 600; font-size: 11px; padding: 4px 18px;
+            }
+            QPushButton:hover { background: #48484a; }
+        """)
+        cancel_btn.clicked.connect(dlg.reject)
+
+        move_btn = QtWidgets.QPushButton(
+            f"Move to {'End' if position == 'end' else 'Top'}")
+        move_btn.setFixedHeight(30)
+        move_btn.setDefault(True)
+        move_btn.setStyleSheet("""
+            QPushButton {
+                background: #0a2a3a; color: #32ade6; border: 1px solid #1a5a80;
+                border-radius: 6px; font-weight: 700; font-size: 11px; padding: 4px 18px;
+            }
+            QPushButton:hover { background: #1a3a5a; color: #5bc8f5; border-color: #2a80c0; }
+            QPushButton:pressed { background: #061422; }
+        """)
+        move_btn.clicked.connect(dlg.accept)
+
+        btn_row.addWidget(cancel_btn)
+        btn_row.addStretch()
+        btn_row.addWidget(move_btn)
+        layout.addLayout(btn_row)
+
+        # Also accept on double-click
+        tag_list.itemDoubleClicked.connect(lambda: dlg.accept())
+
+        if dlg.exec_() != QtWidgets.QDialog.Accepted:
+            return
+
+        selected_tag_item = tag_list.currentItem()
+        if selected_tag_item is None:
+            return
+        chosen_group = selected_tag_item.data(Qt.UserRole)
+
+        # ── Perform the move ──────────────────────────────────────────────────
+        # Collect selected items in their current order
+        move_items = sorted(sel, key=lambda x: self.list.row(x))
+        move_rows  = set(self.list.row(it) for it in move_items)
+
+        # Don't move items that are already inside the tag group at the target position
+        # (prevents no-op shuffles)
+
+        self.list.setUpdatesEnabled(False)
+
+        # Take items out (in reverse order to keep indices stable)
+        for item in reversed(move_items):
+            self.list.takeItem(self.list.row(item))
+
+        # After taking items out, tag groups may have shifted — recalculate
+        # the target row by finding the tag marker image by path
+        tag_marker_path = None
+        for row, tov in self.list._tag_overlays.items():
+            if tov.get_tag() == chosen_group['tag']:
+                tag_marker_path = tov._path
+                break
+
+        # Find the new row of the tag marker
+        tag_marker_row = -1
+        for i in range(self.list.count()):
+            item = self.list.item(i)
+            if item and (item.data(Qt.UserRole) or "") == tag_marker_path:
+                tag_marker_row = i
+                break
+
+        if tag_marker_row < 0:
+            # Tag marker was among the moved items or no longer exists.
+            # Fall back: just put them at the end of the list.
+            insert_at = self.list.count()
+        else:
+            # Find end of this tag group (next tag or end of list)
+            group_end = self.list.count() - 1
+            for i in range(tag_marker_row + 1, self.list.count()):
+                tov = self.list._tag_overlays.get(i)
+                if tov and tov.get_tag():
+                    group_end = i - 1
+                    break
+
+            if position == 'end':
+                insert_at = group_end + 1
+            else:  # 'top'
+                insert_at = tag_marker_row + 1
+
+        # Insert the items
+        self.list.selectionModel().clearSelection()
+        for i, item in enumerate(move_items):
+            self.list.insertItem(insert_at + i, item)
+            item.setSelected(True)
+
+        self.list.setUpdatesEnabled(True)
+
+        # Scroll to show the moved items
+        if move_items:
+            self.list.scrollToItem(move_items[0], QAbstractItemView.PositionAtCenter)
+
+        # Rebuild overlays
+        self.list._rebuild_star_index()
+        self.list._rebuild_tag_index()
+        QTimer.singleShot(50, self.list._reposition_overlays)
+        QTimer.singleShot(100, self._update_scene_banner)
 
     # ── Rename All ────────────────────────────────────────────────────────────
 
@@ -3883,6 +3839,8 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                     break
             else:
                 insert_at = self.list.count()
+        # FIXED: use selectionModel().clearSelection() for clean state
+        self.list.selectionModel().clearSelection()
         for i, item in enumerate(new_items):
             self.list.insertItem(insert_at + i, item)
             item.setSelected(True)
@@ -3964,6 +3922,8 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                           reverse=True)
             for r in rows:
                 self.list.takeItem(r)
+            # FIXED: use selectionModel().clearSelection() for clean state
+            self.list.selectionModel().clearSelection()
             for i, it in enumerate(renamed_items_ordered):
                 self.list.insertItem(first_row + i, it)
                 it.setSelected(True)
@@ -3980,18 +3940,11 @@ class ImageOrganizer(QtWidgets.QMainWindow):
     # ── Export Favorites ──────────────────────────────────────────────────────
 
     def export_favorites(self):
-        """
-        Export all ★-starred images to  <open_folder>/00_favorites/.
-        If the destination folder already exists it is cleared first, then
-        all currently starred images are copied fresh.  Originals are never
-        moved or modified.
-        """
         if not self.folder:
             QtWidgets.QMessageBox.warning(
                 self, "No Folder", "Please open a folder first.")
             return
 
-        # Collect starred paths
         starred_paths = []
         for i in range(self.list.count()):
             item = self.list.item(i)
@@ -4013,7 +3966,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         dest_folder  = os.path.join(self.folder, "00_favorites")
         folder_exists = os.path.isdir(dest_folder)
 
-        # Build confirmation message
         if folder_exists:
             existing_count = len([
                 f for f in os.listdir(dest_folder)
@@ -4045,7 +3997,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
 
         import shutil
 
-        # Clear destination folder if it already exists
         if folder_exists:
             try:
                 shutil.rmtree(dest_folder)
@@ -4055,7 +4006,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                     f"Could not clear existing folder:\n{dest_folder}\n\n{e}")
                 return
 
-        # Create fresh destination folder
         try:
             os.makedirs(dest_folder, exist_ok=True)
         except Exception as e:
@@ -4064,7 +4014,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                 f"Could not create destination folder:\n{dest_folder}\n\n{e}")
             return
 
-        # Copy all starred images
         copied = 0
         errors = []
 
@@ -4072,12 +4021,11 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             fname    = os.path.basename(src_path)
             dst_path = os.path.join(dest_folder, fname)
             try:
-                shutil.copy2(src_path, dst_path)   # preserves EXIF/metadata
+                shutil.copy2(src_path, dst_path)
                 copied += 1
             except Exception as e:
                 errors.append(f"{fname}: {e}")
 
-        # Result summary
         parts = [f"✓  {copied} image{'s' if copied != 1 else ''} exported."]
         if errors:
             parts.append(f"✗  {len(errors)} error{'s' if len(errors) != 1 else ''}:\n"
@@ -4113,7 +4061,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         for _ in range(total):
             item = self.list.item(current_idx)
             if item and text in item.text().lower():
-                self.list.clearSelection()
+                self.list.selectionModel().clearSelection()
                 item.setSelected(True)
                 self.list.scrollToItem(item, QAbstractItemView.PositionAtCenter)
                 self.last_search_index[search_bar] = current_idx
