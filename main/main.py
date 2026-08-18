@@ -2588,6 +2588,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.list.b_key_pressed.connect(self.handle_b_key)
         self.list.preview_path_changed.connect(self.update_preview_from_path)
         self.list.scene_tag_changed.connect(self._update_scene_banner)
+        self.list.scene_tag_changed.connect(self._refresh_tag_jump_combo)
         self.list.verticalScrollBar().valueChanged.connect(self._update_scene_banner)
         self.list.open_fullscreen_requested.connect(self._open_fullscreen)
 
@@ -2632,6 +2633,66 @@ class ImageOrganizer(QtWidgets.QMainWindow):
 
         banner_layout.addWidget(banner_icon)
         banner_layout.addWidget(self.scene_banner_label, 1)
+
+        # ── "Scroll back" button — returns to origin after a move operation ──
+        self._scroll_back_row = -1  # row to scroll back to (set by move ops)
+        self._scroll_back_btn = QtWidgets.QPushButton("⟲")
+        self._scroll_back_btn.setFixedSize(26, 22)
+        self._scroll_back_btn.setToolTip(
+            "Scroll back to where the last moved images were selected from")
+        self._scroll_back_btn.setStyleSheet("""
+            QPushButton {
+                background: #1a2a1a; color: #50c878; border: 1px solid #2a5a2a;
+                border-radius: 4px; font-size: 14px; font-weight: 700;
+                padding: 0px;
+            }
+            QPushButton:hover { background: #2a3a2a; color: #70e898; border-color: #3a7a3a; }
+            QPushButton:pressed { background: #0a1a0a; }
+            QPushButton:disabled { background: #1a1a1c; color: #3a3a3c; border-color: #2a2a2c; }
+        """)
+        self._scroll_back_btn.setEnabled(False)
+        self._scroll_back_btn.clicked.connect(self._do_scroll_back)
+        banner_layout.addWidget(self._scroll_back_btn)
+
+        # ── Tag jump dropdown — select a tag to scroll to it ─────────────────
+        self._tag_jump_combo = QtWidgets.QComboBox()
+        self._tag_jump_combo.setFixedHeight(22)
+        self._tag_jump_combo.setMinimumWidth(140)
+        self._tag_jump_combo.setMaximumWidth(260)
+        self._tag_jump_combo.setToolTip("Jump to a scene tag")
+        self._tag_jump_combo.setStyleSheet("""
+            QComboBox {
+                background: #0d2a3a; color: #32ade6; border: 1px solid #1a4a6a;
+                border-radius: 4px; font-size: 11px; font-weight: 600;
+                padding: 1px 6px 1px 6px;
+            }
+            QComboBox:hover { border-color: #2a80c0; background: #1a3a5a; }
+            QComboBox::drop-down {
+                border: none; width: 18px;
+            }
+            QComboBox::down-arrow {
+                image: none; border: none;
+                width: 0; height: 0;
+                border-left: 4px solid transparent;
+                border-right: 4px solid transparent;
+                border-top: 5px solid #32ade6;
+            }
+            QComboBox QAbstractItemView {
+                background: #1c1c1e; color: #e0e0e0;
+                border: 1px solid #1a4a6a; selection-background-color: #0a2a3a;
+                selection-color: #32ade6; font-size: 11px;
+                outline: none; padding: 2px;
+            }
+            QComboBox QAbstractItemView::item {
+                padding: 4px 8px; min-height: 22px;
+            }
+            QComboBox QAbstractItemView::item:hover {
+                background: #2a2a2e;
+            }
+        """)
+        self._tag_jump_combo.addItem("⤵  Jump to tag…")
+        self._tag_jump_combo.currentIndexChanged.connect(self._on_tag_jump_selected)
+        banner_layout.addWidget(self._tag_jump_combo)
 
         # ── Colored keyboard hint bar ─────────────────────────────────────────
         hint_bar = QtWidgets.QWidget()
@@ -2803,6 +2864,63 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                     font-weight: 600; font-style: italic;
                 }
             """)
+
+    # ── Tag jump dropdown ───────────────────────────────────────────────────
+
+    def _refresh_tag_jump_combo(self):
+        """Rebuild the tag-jump dropdown from current tag overlays."""
+        combo = self._tag_jump_combo
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem("⤵  Jump to tag…")
+
+        groups = self._get_tag_groups()
+        for g in groups:
+            count = g['end'] - g['start'] + 1
+            combo.addItem(
+                f"🏷  {g['tag']}  ({count})",
+                g['tag_row'])  # store the row as item data
+        combo.setCurrentIndex(0)
+        combo.blockSignals(False)
+
+    def _on_tag_jump_selected(self, index):
+        """When a tag is picked from the dropdown, scroll to that tag."""
+        if index <= 0:
+            return  # placeholder selected
+        row = self._tag_jump_combo.itemData(index)
+        if row is not None and 0 <= row < self.list.count():
+            item = self.list.item(row)
+            if item:
+                self.list.scrollToItem(item, QAbstractItemView.PositionAtTop)
+        # Reset to placeholder so the same tag can be selected again
+        self._tag_jump_combo.blockSignals(True)
+        self._tag_jump_combo.setCurrentIndex(0)
+        self._tag_jump_combo.blockSignals(False)
+
+    # ── Scroll back after move ────────────────────────────────────────────────
+
+    def _save_scroll_back_position(self, row):
+        """
+        Save a row index to scroll back to after a move operation.
+        Enables the scroll-back button.
+        """
+        if row < 0:
+            return
+        # Clamp to current list size
+        self._scroll_back_row = min(row, self.list.count() - 1)
+        self._scroll_back_btn.setEnabled(True)
+        self._scroll_back_btn.setToolTip(
+            f"Scroll back to row {self._scroll_back_row} "
+            f"(origin of last move)")
+
+    def _do_scroll_back(self):
+        """Scroll the list back to the saved position."""
+        row = self._scroll_back_row
+        if row < 0 or row >= self.list.count():
+            return
+        item = self.list.item(row)
+        if item:
+            self.list.scrollToItem(item, QAbstractItemView.PositionAtCenter)
 
     # ── Favorites filter ──────────────────────────────────────────────────────
 
@@ -3162,6 +3280,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self._progress_done()
         QTimer.singleShot(100, self.list._reposition_overlays)
         QTimer.singleShot(150, self._update_scene_banner)
+        QTimer.singleShot(200, self._refresh_tag_jump_combo)
         if self.list.count() > 0:
             self.list.setCurrentRow(0)
             self.list.setFocus()
@@ -3355,6 +3474,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self._progress_done()
         QTimer.singleShot(100, self.list._reposition_overlays)
         QTimer.singleShot(150, self._update_scene_banner)
+        QTimer.singleShot(200, self._refresh_tag_jump_combo)
         final_files = [f for f in os.listdir(self.folder)
                        if os.path.splitext(f)[1].lower() in SUPPORTED_EXT]
         self.current_folder_files = set(final_files)
@@ -3436,6 +3556,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         items = sorted(self.list.selectedItems(), key=lambda x: self.list.row(x))
         if not items:
             return
+        self._save_scroll_back_position(self.list.row(items[0]))
         self.list.setUpdatesEnabled(False)
         for item in reversed(items):
             self.list.takeItem(self.list.row(item))
@@ -3454,6 +3575,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         items = sorted(self.list.selectedItems(), key=lambda x: self.list.row(x))
         if not items:
             return
+        self._save_scroll_back_position(self.list.row(items[0]))
         self.list.setUpdatesEnabled(False)
         for item in reversed(items):
             self.list.takeItem(self.list.row(item))
@@ -3657,8 +3779,9 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         move_items = sorted(sel, key=lambda x: self.list.row(x))
         move_rows  = set(self.list.row(it) for it in move_items)
 
-        # Don't move items that are already inside the tag group at the target position
-        # (prevents no-op shuffles)
+        # Save the origin row so the user can scroll back after the move
+        origin_row = self.list.row(move_items[0])
+        self._save_scroll_back_position(origin_row)
 
         self.list.setUpdatesEnabled(False)
 
@@ -3716,6 +3839,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.list._rebuild_tag_index()
         QTimer.singleShot(50, self.list._reposition_overlays)
         QTimer.singleShot(100, self._update_scene_banner)
+        QTimer.singleShot(150, self._refresh_tag_jump_combo)
 
     # ── Rename All ────────────────────────────────────────────────────────────
 
