@@ -1754,7 +1754,7 @@ class FullscreenViewer(QtWidgets.QWidget):
         bh = self._BTN_H
         is_starred = self._get_current_starred(path)
         if is_starred:
-            self._star_btn.setText("\u2605  Starred  (S)  ·  Remove (D)")
+            self._star_btn.setText("\u2605  Star/Unstar (S/D)")
             self._star_btn.setStyleSheet(f"""
                 QPushButton {{
                     background: #2a2000; color: #ffd60a; border: 1px solid #ffd60a;
@@ -1765,7 +1765,7 @@ class FullscreenViewer(QtWidgets.QWidget):
                 QPushButton:pressed {{ background: #1a1400; }}
             """)
         else:
-            self._star_btn.setText("\u2606  Add Star  (S)")
+            self._star_btn.setText("\u2606  Star/Unstar (S/D)")
             self._star_btn.setStyleSheet(f"""
                 QPushButton {{
                     background: #1a1a1c; color: #666668; border: 1px solid #2e2e30;
