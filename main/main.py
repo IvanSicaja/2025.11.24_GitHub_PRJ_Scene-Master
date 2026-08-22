@@ -1231,11 +1231,6 @@ class DragDropListWidget(QtWidgets.QListWidget):
                 modifiers = event.modifiers()
                 if not (modifiers & Qt.ControlModifier or modifiers & Qt.ShiftModifier):
                     self.clearSelection()
-        elif event.button() == Qt.RightButton:
-            item = self.itemAt(event.pos())
-            if item:
-                name_no_ext = os.path.splitext(item.text())[0]
-                self.b_key_pressed.emit(name_no_ext)
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event):
@@ -1287,12 +1282,12 @@ class DragDropListWidget(QtWidgets.QListWidget):
             event.accept()
             return
         if event.key() == Qt.Key_G:
-            for item in self.selectedItems():
-                row  = self.row(item)
-                star = self._star_overlays.get(row)
-                if star and star._supported:
-                    if set_image_rating(star._path, 0):
-                        star.set_starred(False)
+            # Fill Base Name field from the image currently under the mouse cursor
+            pos = self.viewport().mapFromGlobal(QtGui.QCursor.pos())
+            item = self.itemAt(pos)
+            if item:
+                name_no_ext = os.path.splitext(item.text())[0]
+                self.b_key_pressed.emit(name_no_ext)
             event.accept()
             return
         if event.key() == Qt.Key_T:
@@ -2205,7 +2200,8 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         digits_row.addStretch()
 
         b_key_hint = QtWidgets.QLabel(
-            "Select a thumbnail and press B to load its name as Base Name.")
+            "Hover over a thumbnail and press G to load its name as Base Name.\n"
+            "Or select a thumbnail and press B.")
         b_key_hint.setWordWrap(True)
         b_key_hint.setStyleSheet(
             "font-size: 10px; color: #636366; background: transparent; border: none;")
@@ -2628,7 +2624,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         hint_bar_layout.addWidget(_hint_lbl(" Fullscreen — (F)", "#186040"))
         hint_bar_layout.addWidget(_sep())
         hint_bar_layout.addWidget(_hint_lbl("✎", "#2a6a5a"))
-        hint_bar_layout.addWidget(_hint_lbl(" Base Name — (B / Right-click)", "#1e4a40"))
+        hint_bar_layout.addWidget(_hint_lbl(" Base Name — (B / G hover)", "#1e4a40"))
         hint_bar_layout.addWidget(_sep())
         hint_bar_layout.addWidget(_hint_lbl("◀ ▶", "#304060"))
         hint_bar_layout.addWidget(_hint_lbl(" Navigate", "#253050"))
@@ -3357,8 +3353,23 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             list_item = QtWidgets.QListWidgetItem(display)
             list_item.setData(Qt.UserRole, g)
             tag_list.addItem(list_item)
-        if tag_list.count() > 0:
+        # Auto-select the last used tag (remembered across sessions)
+        last_tag = self.settings.value("last_move_to_tag", "")
+        preselected = False
+        if last_tag and tag_list.count() > 0:
+            for idx in range(tag_list.count()):
+                g = tag_list.item(idx).data(Qt.UserRole)
+                if g and g['tag'] == last_tag:
+                    tag_list.setCurrentRow(idx)
+                    preselected = True
+                    break
+        if not preselected and tag_list.count() > 0:
             tag_list.setCurrentRow(0)
+        # Size the tag list to show all items (cap at 600px, scroll if needed)
+        item_h = 34  # approximate height per item (padding + font)
+        desired_h = tag_list.count() * item_h + 12  # +12 for list padding
+        max_h = 600
+        tag_list.setMinimumHeight(min(desired_h, max_h))
         layout.addWidget(tag_list)
         btn_row = QtWidgets.QHBoxLayout()
         btn_row.setSpacing(8)
@@ -3380,6 +3391,8 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         selected_tag_item = tag_list.currentItem()
         if selected_tag_item is None: return
         chosen_group = selected_tag_item.data(Qt.UserRole)
+        # Remember this tag for next time (persists across sessions)
+        self.settings.setValue("last_move_to_tag", chosen_group['tag'])
         move_items = sorted(sel, key=lambda x: self.list.row(x))
         origin_row = self.list.row(move_items[0])
         self._save_scroll_back_position(origin_row)
