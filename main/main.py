@@ -1037,8 +1037,6 @@ class DragDropListWidget(QtWidgets.QListWidget):
     def _reposition_stars(self):
         self._reposition_overlays()
 
-    # ── star management ───────────────────────────────────────────────────────
-
     def add_star_for_item(self, row: int):
         item = self.item(row)
         if item is None:
@@ -1066,19 +1064,16 @@ class DragDropListWidget(QtWidgets.QListWidget):
     def _rebuild_star_index(self):
         path_to_star = {s._path: s for s in self._star_overlays.values()}
         self._star_overlays.clear()
-
         current_paths = set()
         for i in range(self.count()):
             item = self.item(i)
             if item is not None:
                 current_paths.add(item.data(Qt.UserRole) or "")
-
         for path, star in list(path_to_star.items()):
             if path not in current_paths:
                 star.hide()
                 star.deleteLater()
                 del path_to_star[path]
-
         for i in range(self.count()):
             item = self.item(i)
             if item is None:
@@ -1126,8 +1121,6 @@ class DragDropListWidget(QtWidgets.QListWidget):
                 star.update_path(new_path)
                 break
 
-    # ── tag management ────────────────────────────────────────────────────────
-
     def add_tag_for_item(self, row: int):
         item = self.item(row)
         if item is None:
@@ -1154,19 +1147,16 @@ class DragDropListWidget(QtWidgets.QListWidget):
     def _rebuild_tag_index(self):
         path_to_tag = {t._path: t for t in self._tag_overlays.values()}
         self._tag_overlays.clear()
-
         current_paths = set()
         for i in range(self.count()):
             item = self.item(i)
             if item is not None:
                 current_paths.add(item.data(Qt.UserRole) or "")
-
         for path, tov in list(path_to_tag.items()):
             if path not in current_paths:
                 tov.hide()
                 tov.deleteLater()
                 del path_to_tag[path]
-
         for i in range(self.count()):
             item = self.item(i)
             if item is None:
@@ -1219,8 +1209,6 @@ class DragDropListWidget(QtWidgets.QListWidget):
         self.clear_stars()
         self.clear_tags()
 
-    # ── overrides ─────────────────────────────────────────────────────────────
-
     def resizeEvent(self, event):
         super().resizeEvent(event)
         QTimer.singleShot(0, self._reposition_overlays)
@@ -1228,8 +1216,6 @@ class DragDropListWidget(QtWidgets.QListWidget):
     def scrollContentsBy(self, dx, dy):
         super().scrollContentsBy(dx, dy)
         self._reposition_overlays()
-
-    # ── FIXED: mousePressEvent — clear spurious selections ────────────────────
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -1242,7 +1228,6 @@ class DragDropListWidget(QtWidgets.QListWidget):
                     self._last_preview_path = path
                     self.preview_path_changed.emit(path)
             else:
-                # Clicked on empty space — clear selection unless modifier held
                 modifiers = event.modifiers()
                 if not (modifiers & Qt.ControlModifier or modifiers & Qt.ShiftModifier):
                     self.clearSelection()
@@ -1482,7 +1467,6 @@ class DragDropListWidget(QtWidgets.QListWidget):
         for r in reversed(sorted(drag_rows)):
             itm = self.takeItem(r)
             dragged_items.insert(0, itm)
-        # FIXED: use selectionModel().clearSelection() for clean state
         self.selectionModel().clearSelection()
         for i, itm in enumerate(dragged_items):
             self.insertItem(insert_at + i, itm)
@@ -1516,21 +1500,17 @@ class FullscreenViewer(QtWidgets.QWidget):
         self._row   = start_row
         self._total = list_widget.count()
         self._thumb_cache = {}
-
         self.setWindowTitle("Scenify — Fullscreen")
         self.setStyleSheet("background: #000000;")
         self.setFocusPolicy(Qt.StrongFocus)
-
         self._img_label = QtWidgets.QLabel(self)
         self._img_label.setAlignment(Qt.AlignCenter)
         self._img_label.setStyleSheet("background: #000000; border: none;")
-
         self._star_overlay_lbl = QtWidgets.QLabel(self)
         self._star_overlay_lbl.setAlignment(Qt.AlignCenter)
         self._star_overlay_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self._star_overlay_lbl.setStyleSheet(
             "background: transparent; border: none; font-size: 26px;")
-
         self._bar = QtWidgets.QWidget(self)
         self._bar.setStyleSheet("""
             QWidget {
@@ -1539,11 +1519,9 @@ class FullscreenViewer(QtWidgets.QWidget):
                 border-top: 1px solid #222224;
             }
         """)
-
         bar_layout = QtWidgets.QHBoxLayout(self._bar)
         bar_layout.setContentsMargins(18, 8, 18, 8)
         bar_layout.setSpacing(16)
-
         left_widget = QtWidgets.QWidget()
         left_widget.setStyleSheet("background: transparent; border: none;")
         left_widget.setFixedWidth(210)
@@ -1551,17 +1529,14 @@ class FullscreenViewer(QtWidgets.QWidget):
         left_vbox.setContentsMargins(0, 0, 0, 0)
         left_vbox.setSpacing(8)
         left_vbox.addStretch()
-
         self._star_btn = QtWidgets.QPushButton()
         self._star_btn.setFixedHeight(self._BTN_H)
         self._star_btn.setFixedWidth(self._BTN_W)
         self._star_btn.clicked.connect(self._toggle_star)
-
         self._tag_btn = QtWidgets.QPushButton()
         self._tag_btn.setFixedHeight(self._BTN_H)
         self._tag_btn.setFixedWidth(self._BTN_W)
         self._tag_btn.clicked.connect(self._open_tag_dialog)
-
         self._close_btn = QtWidgets.QPushButton("\u2715  Close  (F/Esc)")
         self._close_btn.setFixedHeight(self._BTN_H)
         self._close_btn.setFixedWidth(self._BTN_W)
@@ -1576,7 +1551,6 @@ class FullscreenViewer(QtWidgets.QWidget):
             QPushButton:pressed { background: #1a0808; }
         """)
         self._close_btn.clicked.connect(self.close)
-
         self._remove_btn = QtWidgets.QPushButton("\U0001f5d1  Remove  (R)")
         self._remove_btn.setFixedHeight(self._BTN_H)
         self._remove_btn.setFixedWidth(self._BTN_W)
@@ -1595,20 +1569,17 @@ class FullscreenViewer(QtWidgets.QWidget):
             QPushButton:pressed { background: #140c0c; }
         """)
         self._remove_btn.clicked.connect(self._remove_image)
-
         left_vbox.addWidget(self._star_btn)
         left_vbox.addWidget(self._tag_btn)
         left_vbox.addWidget(self._remove_btn)
         left_vbox.addWidget(self._close_btn)
         left_vbox.addStretch()
-
         self._strip_cells = []
         strip_widget = QtWidgets.QWidget()
         strip_widget.setStyleSheet("background: transparent; border: none;")
         strip_hbox = QtWidgets.QHBoxLayout(strip_widget)
         strip_hbox.setContentsMargins(0, 0, 0, 0)
         strip_hbox.setSpacing(self._STRIP_GAP)
-
         for i in range(5):
             cell = QtWidgets.QLabel()
             cell.setFixedSize(self._STRIP_W, self._STRIP_H)
@@ -1618,7 +1589,6 @@ class FullscreenViewer(QtWidgets.QWidget):
             cell.setCursor(Qt.PointingHandCursor)
             self._strip_cells.append(cell)
             strip_hbox.addWidget(cell)
-
         right_widget = QtWidgets.QWidget()
         right_widget.setStyleSheet("background: transparent; border: none;")
         right_widget.setFixedWidth(220)
@@ -1626,37 +1596,31 @@ class FullscreenViewer(QtWidgets.QWidget):
         right_vbox.setContentsMargins(0, 0, 0, 0)
         right_vbox.setSpacing(4)
         right_vbox.addStretch()
-
         self._scene_banner_lbl = QtWidgets.QLabel()
         self._scene_banner_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self._scene_banner_lbl.setWordWrap(True)
         self._scene_banner_lbl.setStyleSheet(
             "color: #32ade6; font-size: 11px; font-weight: 700; "
             "background: transparent; border: none;")
-
         self._name_label = QtWidgets.QLabel()
         self._name_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self._name_label.setStyleSheet(
             "color: #c0c0c0; font-size: 12px; font-weight: 600; "
             "background: transparent; border: none;")
         self._name_label.setWordWrap(True)
-
         self._meta_label = QtWidgets.QLabel()
         self._meta_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self._meta_label.setStyleSheet(
             "color: #3a3a4a; font-size: 11px; background: transparent; border: none;")
-
         right_vbox.addWidget(self._scene_banner_lbl)
         right_vbox.addWidget(self._name_label)
         right_vbox.addWidget(self._meta_label)
         right_vbox.addStretch()
-
         bar_layout.addWidget(left_widget, 0, Qt.AlignVCenter)
         bar_layout.addStretch(1)
         bar_layout.addWidget(strip_widget, 0, Qt.AlignVCenter)
         bar_layout.addStretch(1)
         bar_layout.addWidget(right_widget, 0, Qt.AlignVCenter)
-
         self._update_display()
 
     def showEvent(self, event):
@@ -1736,7 +1700,6 @@ class FullscreenViewer(QtWidgets.QWidget):
         if item is None:
             return
         path = item.data(Qt.UserRole) or ""
-
         if os.path.exists(path):
             pix = QtGui.QPixmap(path)
             if not pix.isNull():
@@ -1745,12 +1708,10 @@ class FullscreenViewer(QtWidgets.QWidget):
                 if aw > 0 and ah > 0:
                     self._img_label.setPixmap(
                         pix.scaled(aw, ah, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-
         scene_tag = self._get_active_scene_tag()
         self._scene_banner_lbl.setText(f"\U0001f3f7\ufe0f  {scene_tag}" if scene_tag else "")
         self._name_label.setText(os.path.basename(path))
         self._meta_label.setText(f"{self._row + 1}  /  {self._total}")
-
         bh = self._BTN_H
         is_starred = self._get_current_starred(path)
         if is_starred:
@@ -1776,7 +1737,6 @@ class FullscreenViewer(QtWidgets.QWidget):
                                        border-color: #665500; }}
                 QPushButton:pressed {{ background: #1a1400; }}
             """)
-
         has_tag = bool(self._get_current_tag(path))
         if has_tag:
             self._tag_btn.setText("\U0001f3f7  Tagged  (T)")
@@ -1801,7 +1761,6 @@ class FullscreenViewer(QtWidgets.QWidget):
                                        border-color: #1a5580; }}
                 QPushButton:pressed {{ background: #061422; }}
             """)
-
         is_starred_for_overlay = self._get_current_starred(path)
         if is_starred_for_overlay:
             self._star_overlay_lbl.setText("★")
@@ -1813,7 +1772,6 @@ class FullscreenViewer(QtWidgets.QWidget):
             self._star_overlay_lbl.setStyleSheet(
                 "background: transparent; border: none; font-size: 26px; "
                 "color: rgba(255, 255, 255, 40);")
-
         for idx, cell in enumerate(self._strip_cells):
             offset    = idx - 2
             row       = self._row + offset
@@ -1890,10 +1848,8 @@ class FullscreenViewer(QtWidgets.QWidget):
         path = item.data(Qt.UserRole) or ""
         if not path or not os.path.isfile(path):
             return
-
         root_folder = os.path.dirname(path)
         dest_dir    = os.path.join(root_folder, "00_removed")
-
         try:
             os.makedirs(dest_dir, exist_ok=True)
         except Exception as e:
@@ -1902,15 +1858,12 @@ class FullscreenViewer(QtWidgets.QWidget):
                 f"Could not create folder:\n{dest_dir}\n\n{e}",
                 QtWidgets.QMessageBox.Ok, self).exec_()
             return
-
         fname    = os.path.basename(path)
         dst_path = os.path.join(dest_dir, fname)
-
         if os.path.exists(dst_path):
             base, ext = os.path.splitext(fname)
             import time
             dst_path = os.path.join(dest_dir, f"{base}_{int(time.time())}{ext}")
-
         try:
             import shutil
             shutil.move(path, dst_path)
@@ -1920,7 +1873,6 @@ class FullscreenViewer(QtWidgets.QWidget):
                 f"Could not move file:\n{path}\n→ {dst_path}\n\n{e}",
                 QtWidgets.QMessageBox.Ok, self).exec_()
             return
-
         row  = self._row
         star = self._list._star_overlays.pop(row, None)
         if star:
@@ -1932,12 +1884,10 @@ class FullscreenViewer(QtWidgets.QWidget):
         self._list._rebuild_star_index()
         self._list._rebuild_tag_index()
         QTimer.singleShot(50, self._list._reposition_overlays)
-
         self._total = self._list.count()
         if self._total == 0:
             self.close()
             return
-
         if self._row >= self._total:
             self._row = self._total - 1
         self.row_changed.emit(self._row)
@@ -1952,7 +1902,6 @@ class FullscreenViewer(QtWidgets.QWidget):
         path = item.data(Qt.UserRole) or ""
         if os.path.splitext(path)[1].lower() not in XMP_SUPPORTED_EXT:
             return
-
         dlg = QtWidgets.QDialog(self)
         dlg.setWindowTitle("Scene Tag")
         dlg.setMinimumWidth(400)
@@ -1969,19 +1918,16 @@ class FullscreenViewer(QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout(dlg)
         layout.setContentsMargins(18, 16, 18, 16)
         layout.setSpacing(10)
-
         header = QtWidgets.QLabel(
-            f"<b style=\'color:#32ade6;font-size:13px;\'>\U0001f3f7  Scene Tag</b><br>"
-            f"<span style=\'color:#636366;font-size:10px;\'>{os.path.basename(path)}</span>")
+            f"<b style='color:#32ade6;font-size:13px;'>\U0001f3f7  Scene Tag</b><br>"
+            f"<span style='color:#636366;font-size:10px;'>{os.path.basename(path)}</span>")
         header.setTextFormat(Qt.RichText)
         layout.addWidget(header)
-
         current_tag = self._get_current_tag(path)
         edit = QtWidgets.QLineEdit(current_tag)
         edit.setPlaceholderText("e.g.  Garage interior  /  Night scene  /  Act 2")
         edit.setClearButtonEnabled(True)
         layout.addWidget(edit)
-
         brl = QtWidgets.QHBoxLayout()
         brl.setSpacing(8)
         cancel_btn = QtWidgets.QPushButton("Cancel")
@@ -2000,7 +1946,6 @@ class FullscreenViewer(QtWidgets.QWidget):
         brl.addWidget(cancel_btn); brl.addStretch(); brl.addWidget(clear_btn); brl.addWidget(ok_btn)
         layout.addLayout(brl)
         edit.setFocus(); edit.selectAll()
-
         if dlg.exec_() == QtWidgets.QDialog.Accepted:
             new_tag = edit.text().strip()
             if new_tag != current_tag:
@@ -2115,7 +2060,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             QPushButton:hover   { background: #0066CC; }
             QPushButton:pressed { background: #0051A3; }
         """
-        # Tag-move button style (teal/cyan accent to match tag theme)
         tag_move_btn_style = """
             QPushButton {
                 padding: 4px 10px; font-weight: 600; font-size: 11px;
@@ -2146,7 +2090,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         bottom_btn.setFixedHeight(26)
         bottom_btn.clicked.connect(self.move_to_bottom)
 
-        # ── NEW: Move to Tag buttons ──────────────────────────────────────────
         move_tag_end_btn = QtWidgets.QPushButton("🏷  Move Selected to End of Tag")
         move_tag_end_btn.setStyleSheet(tag_move_btn_style)
         move_tag_end_btn.setFixedHeight(26)
@@ -2174,7 +2117,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.rename_selected_btn.setFixedHeight(26)
         self.rename_selected_btn.clicked.connect(self.rename_selected)
 
-        # ── Rename Selected inline options ────────────────────────────────────
         self.rename_options_frame = QtWidgets.QFrame()
         self.rename_options_frame.setStyleSheet("""
             QFrame { background: #2c2c2e; border: 1px solid #3a3a3c; border-radius: 8px; }
@@ -2237,13 +2179,11 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         digits_up_btn.setStyleSheet(arrow_btn_style)
         digits_up_btn.clicked.connect(
             lambda: self.digits_spinbox.setValue(self.digits_spinbox.value() + 1))
-
         digits_down_btn = QtWidgets.QPushButton("↓")
         digits_down_btn.setFixedSize(26, 26)
         digits_down_btn.setStyleSheet(arrow_btn_style)
         digits_down_btn.clicked.connect(
             lambda: self.digits_spinbox.setValue(self.digits_spinbox.value() - 1))
-
         digits_example_label = QtWidgets.QLabel()
         digits_example_label.setStyleSheet(
             "font-size: 10px; color: #636366; background: transparent; border: none;")
@@ -2293,11 +2233,9 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.renumber_btn.clicked.connect(self.renumber_by_base)
         rename_options_layout.addWidget(self.renumber_btn)
 
-        # ── Thumbnail size ────────────────────────────────────────────────────
         self.thumb_label = QtWidgets.QLabel("Thumbnail Size:")
         self.thumb_label.setStyleSheet(
             "font-size: 11px; color: #e0e0e0; font-weight: 500;")
-
         self.thumb_spinbox = QtWidgets.QSpinBox()
         self.thumb_spinbox.setRange(THUMB_MIN, THUMB_MAX)
         self.thumb_spinbox.setValue(DEFAULT_THUMB)
@@ -2312,19 +2250,16 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             QSpinBox:focus { border: 1px solid #0066CC; }
         """)
         self.thumb_spinbox.setFixedSize(72, 24)
-
         thumb_up_btn = QtWidgets.QPushButton("↑")
         thumb_up_btn.setFixedSize(26, 26)
         thumb_up_btn.setStyleSheet(arrow_btn_style)
         thumb_up_btn.clicked.connect(
             lambda: self.thumb_spinbox.setValue(self.thumb_spinbox.value() + 1))
-
         thumb_down_btn = QtWidgets.QPushButton("↓")
         thumb_down_btn.setFixedSize(26, 26)
         thumb_down_btn.setStyleSheet(arrow_btn_style)
         thumb_down_btn.clicked.connect(
             lambda: self.thumb_spinbox.setValue(self.thumb_spinbox.value() - 1))
-
         thumb_label_row = QtWidgets.QHBoxLayout()
         thumb_label_row.setSpacing(4)
         thumb_label_row.addWidget(self.thumb_label)
@@ -2332,7 +2267,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         thumb_label_row.addWidget(thumb_down_btn)
         thumb_label_row.addWidget(thumb_up_btn)
         thumb_label_row.addStretch()
-
         self.thumb_slider = QtWidgets.QSlider(Qt.Horizontal)
         self.thumb_slider.setRange(THUMB_MIN, THUMB_MAX)
         self.thumb_slider.setValue(DEFAULT_THUMB)
@@ -2345,12 +2279,10 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                 margin: -5px 0; border-radius: 7px; }
             QSlider::handle:horizontal:hover { background: #007AFF; }
         """)
-
         self.thumb_slider.valueChanged.connect(self.update_thumb_size)
         self.thumb_spinbox.valueChanged.connect(self._on_thumb_spinbox_changed)
         self._thumb_syncing = False
 
-        # ── Status label ──────────────────────────────────────────────────────
         self.status_label = QtWidgets.QLabel("No folder opened")
         self.status_label.setAlignment(Qt.AlignCenter)
         self.status_label.setFixedHeight(24)
@@ -2358,11 +2290,9 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             "font-size: 10px; padding: 2px 6px; color: #a0a0a0; background: #1c1c1e; "
             "border-radius: 5px; border: 1px solid #3a3a3c;")
 
-        # ── Search bars ───────────────────────────────────────────────────────
         search1_label = QtWidgets.QLabel("Search 1 (Double Left-Click):")
         search1_label.setStyleSheet(
             "font-weight: 600; color: #0a84ff; font-size: 10px;")
-
         self.search_input1 = SmartLineEdit()
         self.search_input1.setPlaceholderText(
             "Dbl left-click: fill & lock | LClick: copy+clear | RClick: paste")
@@ -2370,7 +2300,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.search_input1.returnPressed.connect(
             lambda: self.search_image(1, prev=False))
         self.search_input1.textChanged.connect(lambda: self.reset_search_index(1))
-
         search_layout1 = QtWidgets.QHBoxLayout()
         search_layout1.setSpacing(3)
         self.search_up_btn1   = QtWidgets.QPushButton("↑")
@@ -2388,7 +2317,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         search2_label = QtWidgets.QLabel("Search 2 (Double Right-Click):")
         search2_label.setStyleSheet(
             "font-weight: 600; color: #0a84ff; font-size: 10px;")
-
         self.search_input2 = SmartLineEdit()
         self.search_input2.setPlaceholderText(
             "Dbl right-click: fill & unlock | LClick: copy+clear | RClick: paste")
@@ -2396,7 +2324,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.search_input2.returnPressed.connect(
             lambda: self.search_image(2, prev=False))
         self.search_input2.textChanged.connect(lambda: self.reset_search_index(2))
-
         search_layout2 = QtWidgets.QHBoxLayout()
         search_layout2.setSpacing(3)
         self.search_up_btn2   = QtWidgets.QPushButton("↑")
@@ -2411,7 +2338,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         search_layout2.addWidget(self.search_up_btn2)
         search_layout2.addWidget(self.search_down_btn2)
 
-        # ── Preview ───────────────────────────────────────────────────────────
         self.preview = QtWidgets.QLabel(
             "Preview\n(Double LEFT-click: lock | Double RIGHT-click: unlock)")
         self.preview.setAlignment(Qt.AlignCenter)
@@ -2425,14 +2351,12 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             }
         """)
 
-        # ── Scrollable inner content ──────────────────────────────────────────
         scroll_content = QtWidgets.QWidget()
         scroll_content.setStyleSheet("background: transparent;")
         inner_layout = QtWidgets.QVBoxLayout(scroll_content)
         inner_layout.setSpacing(4)
         inner_layout.setContentsMargins(0, 0, 6, 0)
 
-        # ── Rename lock toggle ────────────────────────────────────────────────
         self._rename_unlocked = False
         self._rename_lock_btn = QtWidgets.QPushButton("🔒  Renaming Locked  (Safe)")
         self._rename_lock_btn.setFixedHeight(28)
@@ -2462,7 +2386,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         inner_layout.addWidget(self.rename_all_btn)
         inner_layout.addWidget(self.rename_selected_btn)
         inner_layout.addWidget(self.rename_options_frame)
-
         self.rename_all_btn.setEnabled(False)
         self.rename_selected_btn.setEnabled(False)
         self.rename_options_frame.setEnabled(False)
@@ -2482,14 +2405,12 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         inner_layout.addWidget(self.preview)
         inner_layout.addSpacing(10)
 
-        # ── Export Favorites ──────────────────────────────────────────────────
         export_sep = QtWidgets.QFrame()
         export_sep.setFrameShape(QtWidgets.QFrame.HLine)
         export_sep.setStyleSheet(
             "color: #3a3a3c; background: #3a3a3c; border: none; max-height: 1px;")
         inner_layout.addWidget(export_sep)
         inner_layout.addSpacing(6)
-
         export_info_lbl = QtWidgets.QLabel(
             "<span style='color:#c8980a;'>★</span>"
             "<span style='color:#8a7030;'> Copies all starred images into "
@@ -2504,7 +2425,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             "background: transparent; border: none; line-height: 160%;")
         inner_layout.addWidget(export_info_lbl)
         inner_layout.addSpacing(5)
-
         export_fav_btn = QtWidgets.QPushButton("★  Export Favorites")
         export_fav_btn.setToolTip(
             "Copies all starred (★) images into '00_favorites/' inside the open folder.\n"
@@ -2513,19 +2433,10 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             QPushButton {
                 padding: 6px 12px; font-weight: 700; font-size: 12px;
                 border-radius: 6px; margin: 1px 0;
-                background: #111113;
-                color: #c8980a;
-                border: 1px solid #665500;
+                background: #111113; color: #c8980a; border: 1px solid #665500;
             }
-            QPushButton:hover {
-                background: #1a1800;
-                border: 1px solid #c8980a;
-                color: #ffd60a;
-            }
-            QPushButton:pressed {
-                background: #0a0a0c;
-                color: #b88000;
-            }
+            QPushButton:hover { background: #1a1800; border: 1px solid #c8980a; color: #ffd60a; }
+            QPushButton:pressed { background: #0a0a0c; color: #b88000; }
         """)
         export_fav_btn.setFixedHeight(34)
         export_fav_btn.clicked.connect(self.export_favorites)
@@ -2549,7 +2460,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
         """)
 
-        # ── Progress bar ──────────────────────────────────────────────────────
         self.progress_bar = QtWidgets.QProgressBar()
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
@@ -2561,7 +2471,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         credit_label = QtWidgets.QLabel("")
         credit_label.setFixedHeight(0)
 
-        # ── Left panel ────────────────────────────────────────────────────────
         left_panel_widget = QtWidgets.QWidget()
         left_panel_widget.setFixedWidth(460)
         left_panel_vbox = QtWidgets.QVBoxLayout(left_panel_widget)
@@ -2569,7 +2478,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         left_panel_vbox.setSpacing(0)
         left_panel_vbox.addWidget(scroll_area)
         left_panel_vbox.addSpacing(3)
-
         progress_container = QtWidgets.QWidget()
         progress_container.setStyleSheet("background: transparent;")
         progress_hbox = QtWidgets.QHBoxLayout(progress_container)
@@ -2579,7 +2487,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         left_panel_vbox.addWidget(progress_container)
         left_panel_vbox.addWidget(credit_label)
 
-        # ── Image list (right side) ───────────────────────────────────────────
         self.list = DragDropListWidget()
         self.list.itemSelectionChanged.connect(self.update_preview)
         self.list.currentItemChanged.connect(self.update_preview_from_current)
@@ -2592,7 +2499,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.list.verticalScrollBar().valueChanged.connect(self._update_scene_banner)
         self.list.open_fullscreen_requested.connect(self._open_fullscreen)
 
-        # ── Scene banner ─────────────────────────────────────────────────────
         self.scene_banner = QtWidgets.QWidget()
         self.scene_banner.setFixedHeight(32)
         self.scene_banner.setStyleSheet("""
@@ -2605,44 +2511,33 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         banner_layout = QtWidgets.QHBoxLayout(self.scene_banner)
         banner_layout.setContentsMargins(12, 0, 12, 0)
         banner_layout.setSpacing(8)
-
         banner_icon = QtWidgets.QLabel("🏷")
         banner_icon.setStyleSheet(
             "background: transparent; border: none; font-size: 13px;")
         banner_icon.setFixedWidth(20)
-
         self.scene_banner_label = QtWidgets.QLabel("— no scene tag —")
         self.scene_banner_label.setStyleSheet("""
             QLabel {
-                background: transparent;
-                border: none;
-                color: #4a9abc;
-                font-size: 12px;
-                font-weight: 600;
-                font-style: italic;
-                letter-spacing: 0.3px;
+                background: transparent; border: none;
+                color: #4a9abc; font-size: 12px; font-weight: 600;
+                font-style: italic; letter-spacing: 0.3px;
             }
         """)
-
         banner_hint = QtWidgets.QLabel(
             "Click  T  on any thumbnail to set a scene tag")
         banner_hint.setStyleSheet(
             "background: transparent; border: none; "
             "color: #2a5a7a; font-size: 10px;")
         banner_hint.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-
         banner_layout.addWidget(banner_icon)
         banner_layout.addWidget(self.scene_banner_label, 1)
 
-        # ── Scroll origin / destination buttons after move operations ────────
-        self._scroll_origin_row = -1   # where images were BEFORE the move
-        self._scroll_dest_row   = -1   # where images ARE after the move
-
+        self._scroll_origin_row = -1
+        self._scroll_dest_row   = -1
         nav_btn_style_origin = """
             QPushButton {
                 background: #1a2a1a; color: #50c878; border: 1px solid #2a5a2a;
-                border-radius: 4px; font-size: 10px; font-weight: 700;
-                padding: 0px 5px;
+                border-radius: 4px; font-size: 10px; font-weight: 700; padding: 0px 5px;
             }
             QPushButton:hover { background: #2a3a2a; color: #70e898; border-color: #3a7a3a; }
             QPushButton:pressed { background: #0a1a0a; }
@@ -2651,14 +2546,12 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         nav_btn_style_dest = """
             QPushButton {
                 background: #1a1a2a; color: #6088e0; border: 1px solid #2a2a5a;
-                border-radius: 4px; font-size: 10px; font-weight: 700;
-                padding: 0px 5px;
+                border-radius: 4px; font-size: 10px; font-weight: 700; padding: 0px 5px;
             }
             QPushButton:hover { background: #2a2a3a; color: #80a8ff; border-color: #3a3a7a; }
             QPushButton:pressed { background: #0a0a1a; }
             QPushButton:disabled { background: #1a1a1c; color: #3a3a3c; border-color: #2a2a2c; }
         """
-
         self._scroll_origin_btn = QtWidgets.QPushButton("⟲ Origin")
         self._scroll_origin_btn.setFixedHeight(22)
         self._scroll_origin_btn.setToolTip(
@@ -2667,7 +2560,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self._scroll_origin_btn.setEnabled(False)
         self._scroll_origin_btn.clicked.connect(self._do_scroll_to_origin)
         banner_layout.addWidget(self._scroll_origin_btn)
-
         self._scroll_dest_btn = QtWidgets.QPushButton("⟳ Moved")
         self._scroll_dest_btn.setFixedHeight(22)
         self._scroll_dest_btn.setToolTip(
@@ -2677,7 +2569,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self._scroll_dest_btn.clicked.connect(self._do_scroll_to_dest)
         banner_layout.addWidget(self._scroll_dest_btn)
 
-        # ── Tag jump dropdown — select a tag to scroll to it ─────────────────
         self._tag_jump_combo = QtWidgets.QComboBox()
         self._tag_jump_combo.setFixedHeight(22)
         self._tag_jump_combo.setMinimumWidth(140)
@@ -2686,38 +2577,27 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self._tag_jump_combo.setStyleSheet("""
             QComboBox {
                 background: #0d2a3a; color: #32ade6; border: 1px solid #1a4a6a;
-                border-radius: 4px; font-size: 11px; font-weight: 600;
-                padding: 1px 6px 1px 6px;
+                border-radius: 4px; font-size: 11px; font-weight: 600; padding: 1px 6px;
             }
             QComboBox:hover { border-color: #2a80c0; background: #1a3a5a; }
-            QComboBox::drop-down {
-                border: none; width: 18px;
-            }
+            QComboBox::drop-down { border: none; width: 18px; }
             QComboBox::down-arrow {
-                image: none; border: none;
-                width: 0; height: 0;
-                border-left: 4px solid transparent;
-                border-right: 4px solid transparent;
+                image: none; border: none; width: 0; height: 0;
+                border-left: 4px solid transparent; border-right: 4px solid transparent;
                 border-top: 5px solid #32ade6;
             }
             QComboBox QAbstractItemView {
-                background: #1c1c1e; color: #e0e0e0;
-                border: 1px solid #1a4a6a; selection-background-color: #0a2a3a;
-                selection-color: #32ade6; font-size: 11px;
-                outline: none; padding: 2px;
+                background: #1c1c1e; color: #e0e0e0; border: 1px solid #1a4a6a;
+                selection-background-color: #0a2a3a; selection-color: #32ade6;
+                font-size: 11px; outline: none; padding: 2px;
             }
-            QComboBox QAbstractItemView::item {
-                padding: 4px 8px; min-height: 22px;
-            }
-            QComboBox QAbstractItemView::item:hover {
-                background: #2a2a2e;
-            }
+            QComboBox QAbstractItemView::item { padding: 4px 8px; min-height: 22px; }
+            QComboBox QAbstractItemView::item:hover { background: #2a2a2e; }
         """)
         self._tag_jump_combo.addItem("⤵  Jump to tag…")
         self._tag_jump_combo.currentIndexChanged.connect(self._on_tag_jump_selected)
         banner_layout.addWidget(self._tag_jump_combo)
 
-        # ── Colored keyboard hint bar ─────────────────────────────────────────
         hint_bar = QtWidgets.QWidget()
         hint_bar.setFixedHeight(24)
         hint_bar.setStyleSheet(
@@ -2725,19 +2605,16 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         hint_bar_layout = QtWidgets.QHBoxLayout(hint_bar)
         hint_bar_layout.setContentsMargins(14, 0, 14, 0)
         hint_bar_layout.setSpacing(0)
-
         def _hint_lbl(text, color):
             lbl = QtWidgets.QLabel(text)
             lbl.setStyleSheet(
                 f"color: {color}; font-size: 10px; font-weight: 600; "
                 "background: transparent; border: none; letter-spacing: 0.2px;")
             return lbl
-
         def _sep():
             s = QtWidgets.QLabel("    ")
             s.setStyleSheet("background: transparent; border: none;")
             return s
-
         hint_bar_layout.addWidget(_hint_lbl("★", "#c8980a"))
         hint_bar_layout.addWidget(_hint_lbl(" Add Star — (S)", "#8a7030"))
         hint_bar_layout.addWidget(_sep())
@@ -2756,7 +2633,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         hint_bar_layout.addWidget(_hint_lbl("◀ ▶", "#304060"))
         hint_bar_layout.addWidget(_hint_lbl(" Navigate", "#253050"))
         hint_bar_layout.addStretch()
-
         self._favorites_filter_active = False
         self._fav_filter_btn = QtWidgets.QPushButton("★  Show Favorites Only")
         self._fav_filter_btn.setFixedHeight(18)
@@ -2769,8 +2645,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             }
             QPushButton:hover   { color: #c8980a; border-color: #665500; }
             QPushButton:checked {
-                background: #1a1500; color: #ffd60a;
-                border: 1px solid #c8980a;
+                background: #1a1500; color: #ffd60a; border: 1px solid #c8980a;
             }
             QPushButton:checked:hover { background: #2a2000; }
         """)
@@ -2786,7 +2661,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         right_vbox.addWidget(hint_bar)
         right_vbox.addWidget(self.list, 1)
 
-        # ── Main layout ───────────────────────────────────────────────────────
         main_layout = QtWidgets.QHBoxLayout(central)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
@@ -2796,23 +2670,17 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         last_folder = self.settings.value("last_folder", "")
         if last_folder and os.path.isdir(last_folder):
             self.folder = last_folder
-
         self.list.setFocus()
-
         self.folder_watch_timer = QTimer(self)
         self.folder_watch_timer.timeout.connect(self.check_for_new_files)
         self.folder_watch_timer.start(5000)
-
         self.show()
         self._apply_rename_lock_visual()
-
-    # ── Global key handler ────────────────────────────────────────────────────
 
     def keyPressEvent(self, event):
         focused = QtWidgets.QApplication.focusWidget()
         in_text = isinstance(focused, (QtWidgets.QLineEdit, QtWidgets.QSpinBox,
                                        QtWidgets.QAbstractSpinBox))
-
         if event.key() == Qt.Key_F and not in_text:
             if hasattr(self, '_viewer') and self._viewer is not None:
                 try:
@@ -2827,22 +2695,18 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                     self._open_fullscreen(row)
             event.accept()
             return
-
         if event.key() in (Qt.Key_S, Qt.Key_D) and not in_text:
             self.list.keyPressEvent(event)
             return
-
         super().keyPressEvent(event)
 
     def _update_scene_banner(self):
         if self.list.count() == 0:
             self._set_banner_text("", "— no scene tag —")
             return
-
         vp_height   = self.list.viewport().height()
         top_row     = -1
         top_y       = vp_height + 1
-
         for i in range(self.list.count()):
             item = self.list.item(i)
             if item is None:
@@ -2854,17 +2718,14 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                 if top_row == -1:
                     top_row = i
                 break
-
         if top_row == -1:
             top_row = self.list.count() - 1
-
         active_tag = ""
         for row in range(top_row, -1, -1):
             tov = self.list._tag_overlays.get(row)
             if tov and tov.get_tag():
                 active_tag = tov.get_tag()
                 break
-
         self._set_banner_text(active_tag)
 
     def _set_banner_text(self, tag: str, override: str = ""):
@@ -2874,8 +2735,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                 QLabel {
                     background: transparent; border: none;
                     color: #32ade6; font-size: 12px;
-                    font-weight: 700; font-style: normal;
-                    letter-spacing: 0.3px;
+                    font-weight: 700; font-style: normal; letter-spacing: 0.3px;
                 }
             """)
         else:
@@ -2888,45 +2748,31 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                 }
             """)
 
-    # ── Tag jump dropdown ───────────────────────────────────────────────────
-
     def _refresh_tag_jump_combo(self):
-        """Rebuild the tag-jump dropdown from current tag overlays."""
         combo = self._tag_jump_combo
         combo.blockSignals(True)
         combo.clear()
         combo.addItem("⤵  Jump to tag…")
-
         groups = self._get_tag_groups()
         for g in groups:
             count = g['end'] - g['start'] + 1
-            combo.addItem(
-                f"🏷  {g['tag']}  ({count})",
-                g['tag_row'])  # store the row as item data
+            combo.addItem(f"🏷  {g['tag']}  ({count})", g['tag_row'])
         combo.setCurrentIndex(0)
         combo.blockSignals(False)
 
     def _on_tag_jump_selected(self, index):
-        """When a tag is picked from the dropdown, scroll to that tag."""
         if index <= 0:
-            return  # placeholder selected
+            return
         row = self._tag_jump_combo.itemData(index)
         if row is not None and 0 <= row < self.list.count():
             item = self.list.item(row)
             if item:
                 self.list.scrollToItem(item, QAbstractItemView.PositionAtTop)
-        # Reset to placeholder so the same tag can be selected again
         self._tag_jump_combo.blockSignals(True)
         self._tag_jump_combo.setCurrentIndex(0)
         self._tag_jump_combo.blockSignals(False)
 
-    # ── Scroll origin / destination after move ──────────────────────────────
-
     def _save_scroll_back_position(self, origin_row):
-        """
-        Save the origin row (where images were before the move).
-        The destination row is set separately by _save_scroll_dest_position().
-        """
         if origin_row < 0:
             return
         self._scroll_origin_row = min(origin_row, max(self.list.count() - 1, 0))
@@ -2936,7 +2782,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             f"where images were before the move")
 
     def _save_scroll_dest_position(self, dest_row):
-        """Save the destination row (where moved images ended up)."""
         if dest_row < 0:
             return
         self._scroll_dest_row = min(dest_row, max(self.list.count() - 1, 0))
@@ -2944,35 +2789,28 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self._scroll_dest_btn.setToolTip(
             f"Scroll to row {self._scroll_dest_row} — "
             f"where the moved images are now")
-        # After a move we auto-scroll to destination, so disable dest initially
         self._scroll_dest_btn.setEnabled(False)
         self._scroll_origin_btn.setEnabled(True)
 
     def _do_scroll_to_origin(self):
-        """Scroll to where the images were before the move."""
         row = self._scroll_origin_row
         if row < 0 or row >= self.list.count():
             return
         item = self.list.item(row)
         if item:
             self.list.scrollToItem(item, QAbstractItemView.PositionAtCenter)
-        # Now we're at origin — disable origin, enable dest
         self._scroll_origin_btn.setEnabled(False)
         self._scroll_dest_btn.setEnabled(True)
 
     def _do_scroll_to_dest(self):
-        """Scroll to where the moved images are now."""
         row = self._scroll_dest_row
         if row < 0 or row >= self.list.count():
             return
         item = self.list.item(row)
         if item:
             self.list.scrollToItem(item, QAbstractItemView.PositionAtCenter)
-        # Now we're at dest — disable dest, enable origin
         self._scroll_dest_btn.setEnabled(False)
         self._scroll_origin_btn.setEnabled(True)
-
-    # ── Favorites filter ──────────────────────────────────────────────────────
 
     def _toggle_favorites_filter(self):
         self._favorites_filter_active = self._fav_filter_btn.isChecked()
@@ -2990,16 +2828,12 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                 item.setHidden(not is_starred)
             else:
                 item.setHidden(False)
-
         QTimer.singleShot(30, self.list._reposition_overlays)
         QTimer.singleShot(60, self._update_scene_banner)
-
-    # ── Fullscreen viewer ─────────────────────────────────────────────────────
 
     def _open_fullscreen(self, start_row: int):
         if self.list.count() == 0:
             return
-
         if hasattr(self, '_viewer') and self._viewer is not None:
             try:
                 self._viewer._row = start_row
@@ -3009,7 +2843,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                 return
             except RuntimeError:
                 self._viewer = None
-
         viewer = FullscreenViewer(self.list, start_row, parent=None)
         viewer.row_changed.connect(self._on_fullscreen_row_changed)
         viewer.star_changed.connect(self._on_fullscreen_star_changed)
@@ -3074,114 +2907,44 @@ class ImageOrganizer(QtWidgets.QMainWindow):
     def _on_fullscreen_tag_changed(self, row: int, tag_text: str):
         self._update_scene_banner()
 
-    # ── Rename lock ───────────────────────────────────────────────────────────
-
     def _toggle_rename_lock(self):
         self._rename_unlocked = not self._rename_unlocked
         self._apply_rename_lock_visual()
 
     def _apply_rename_lock_visual(self):
         enabled = self._rename_unlocked
-
         self.rename_all_btn.setEnabled(enabled)
         self.rename_selected_btn.setEnabled(enabled)
         self.rename_options_frame.setEnabled(enabled)
         self.renumber_btn.setEnabled(enabled)
-
-        _dim_btn = """
-            QPushButton {
-                padding: 4px 10px; font-weight: 600; font-size: 11px;
-                border-radius: 5px; margin: 1px 0;
-                background: #2a2a2c; color: #5a5a60; border: 1px solid #3a3a3e;
-            }
-        """
-        _dim_renumber = """
-            QPushButton {
-                padding: 4px 10px; font-weight: 600; font-size: 11px;
-                border-radius: 5px; margin: 2px 0 0 0;
-                background: #222228; color: #4a4a50; border: 1px solid #32323a;
-            }
-        """
-        _active_blue = """
-            QPushButton {
-                padding: 4px 10px; font-weight: 600; font-size: 11px;
-                border-radius: 5px; margin: 1px 0;
-                background: #0066CC; color: white; border: none;
-            }
-            QPushButton:hover   { background: #007AFF; }
-            QPushButton:pressed { background: #0051A3; }
-        """
-        _active_renumber = """
-            QPushButton {
-                padding: 4px 10px; font-weight: 600; font-size: 11px;
-                border-radius: 5px; margin: 2px 0 0 0;
-                background: #2a4a2a; color: #30d158; border: 1px solid #30d158;
-            }
-            QPushButton:hover   { background: #1e6e3e; color: #ffffff; }
-            QPushButton:pressed { background: #155230; }
-        """
-        _dim_frame = """
-            QFrame { background: #202022; border: 1px solid #303034; border-radius: 8px; }
-        """
-        _active_frame = """
-            QFrame { background: #2c2c2e; border: 1px solid #3a3a3c; border-radius: 8px; }
-        """
-
+        _dim_btn = "QPushButton { padding: 4px 10px; font-weight: 600; font-size: 11px; border-radius: 5px; margin: 1px 0; background: #2a2a2c; color: #5a5a60; border: 1px solid #3a3a3e; }"
+        _dim_renumber = "QPushButton { padding: 4px 10px; font-weight: 600; font-size: 11px; border-radius: 5px; margin: 2px 0 0 0; background: #222228; color: #4a4a50; border: 1px solid #32323a; }"
+        _active_blue = "QPushButton { padding: 4px 10px; font-weight: 600; font-size: 11px; border-radius: 5px; margin: 1px 0; background: #0066CC; color: white; border: none; } QPushButton:hover { background: #007AFF; } QPushButton:pressed { background: #0051A3; }"
+        _active_renumber = "QPushButton { padding: 4px 10px; font-weight: 600; font-size: 11px; border-radius: 5px; margin: 2px 0 0 0; background: #2a4a2a; color: #30d158; border: 1px solid #30d158; } QPushButton:hover { background: #1e6e3e; color: #ffffff; } QPushButton:pressed { background: #155230; }"
+        _dim_frame = "QFrame { background: #202022; border: 1px solid #303034; border-radius: 8px; }"
+        _active_frame = "QFrame { background: #2c2c2e; border: 1px solid #3a3a3c; border-radius: 8px; }"
         if enabled:
             self.rename_all_btn.setStyleSheet(_active_blue)
             self.rename_selected_btn.setStyleSheet(_active_blue)
             self.rename_options_frame.setStyleSheet(_active_frame)
             self.renumber_btn.setStyleSheet(_active_renumber)
             self._rename_lock_btn.setText("🔓  Renaming Unlocked  (Careful!)")
-            self._rename_lock_btn.setStyleSheet("""
-                QPushButton {
-                    padding: 4px 10px; font-weight: 700; font-size: 11px;
-                    border-radius: 5px; margin: 1px 0;
-                    background: #2a0d0d; color: #ff6b35; border: 1px solid #cc4400;
-                }
-                QPushButton:hover   { background: #3a1510; color: #ff8855; border-color: #ff6b35; }
-                QPushButton:pressed { background: #1a0808; }
-            """)
+            self._rename_lock_btn.setStyleSheet("QPushButton { padding: 4px 10px; font-weight: 700; font-size: 11px; border-radius: 5px; margin: 1px 0; background: #2a0d0d; color: #ff6b35; border: 1px solid #cc4400; } QPushButton:hover { background: #3a1510; color: #ff8855; border-color: #ff6b35; } QPushButton:pressed { background: #1a0808; }")
         else:
             self.rename_all_btn.setStyleSheet(_dim_btn)
             self.rename_selected_btn.setStyleSheet(_dim_btn)
             self.rename_options_frame.setStyleSheet(_dim_frame)
             self.renumber_btn.setStyleSheet(_dim_renumber)
             self._rename_lock_btn.setText("🔒  Renaming Locked  (Safe)")
-            self._rename_lock_btn.setStyleSheet("""
-                QPushButton {
-                    padding: 4px 10px; font-weight: 700; font-size: 11px;
-                    border-radius: 5px; margin: 1px 0;
-                    background: #0d2a12; color: #30d158; border: 1px solid #30d158;
-                }
-                QPushButton:hover   { background: #174a20; color: #5eff88; }
-                QPushButton:pressed { background: #0a1e0d; }
-            """)
-
-    # ── B-key ─────────────────────────────────────────────────────────────────
+            self._rename_lock_btn.setStyleSheet("QPushButton { padding: 4px 10px; font-weight: 700; font-size: 11px; border-radius: 5px; margin: 1px 0; background: #0d2a12; color: #30d158; border: 1px solid #30d158; } QPushButton:hover { background: #174a20; color: #5eff88; } QPushButton:pressed { background: #0a1e0d; }")
 
     def handle_b_key(self, name_no_ext: str):
         self.rename_base_input.setText(name_no_ext)
-        self.rename_base_input.setStyleSheet("""
-            QLineEdit {
-                background-color: #1c1c1e; border: 1px solid #30d158;
-                border-radius: 6px; padding: 3px 8px; color: #e0e0e0;
-                font-size: 12px; selection-background-color: #0066CC;
-            }
-        """)
+        self.rename_base_input.setStyleSheet("QLineEdit { background-color: #1c1c1e; border: 1px solid #30d158; border-radius: 6px; padding: 3px 8px; color: #e0e0e0; font-size: 12px; selection-background-color: #0066CC; }")
         QTimer.singleShot(600, self._reset_base_input_style)
 
     def _reset_base_input_style(self):
-        self.rename_base_input.setStyleSheet("""
-            QLineEdit {
-                background-color: #1c1c1e; border: 1px solid #3a3a3c;
-                border-radius: 6px; padding: 3px 8px; color: #e0e0e0;
-                font-size: 12px; selection-background-color: #0066CC;
-            }
-            QLineEdit:focus { border: 1px solid #0066CC; }
-        """)
-
-    # ── Progress helpers ──────────────────────────────────────────────────────
+        self.rename_base_input.setStyleSheet("QLineEdit { background-color: #1c1c1e; border: 1px solid #3a3a3c; border-radius: 6px; padding: 3px 8px; color: #e0e0e0; font-size: 12px; selection-background-color: #0066CC; } QLineEdit:focus { border: 1px solid #0066CC; }")
 
     def _progress_start(self):
         self.progress_bar.setFormat("Loading: %p%")
@@ -3203,66 +2966,46 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                 if os.path.splitext(f)[1].lower() in SUPPORTED_EXT)
         self.folder_watch_timer.start(5000)
 
-    # ── Theme ─────────────────────────────────────────────────────────────────
-
     def apply_dark_theme(self):
         palette = QtGui.QPalette()
-        palette.setColor(QtGui.QPalette.Window,          QtGui.QColor(28, 28, 30))
-        palette.setColor(QtGui.QPalette.WindowText,      QtGui.QColor(224, 224, 224))
-        palette.setColor(QtGui.QPalette.Base,            QtGui.QColor(22, 22, 23))
-        palette.setColor(QtGui.QPalette.AlternateBase,   QtGui.QColor(44, 44, 46))
-        palette.setColor(QtGui.QPalette.ToolTipBase,     QtGui.QColor(58, 58, 60))
-        palette.setColor(QtGui.QPalette.ToolTipText,     QtGui.QColor(224, 224, 224))
-        palette.setColor(QtGui.QPalette.Text,            QtGui.QColor(224, 224, 224))
-        palette.setColor(QtGui.QPalette.Button,          QtGui.QColor(58, 58, 60))
-        palette.setColor(QtGui.QPalette.ButtonText,      QtGui.QColor(224, 224, 224))
-        palette.setColor(QtGui.QPalette.BrightText,      QtGui.QColor(255, 255, 255))
-        palette.setColor(QtGui.QPalette.Link,            QtGui.QColor(10, 132, 255))
-        palette.setColor(QtGui.QPalette.Highlight,       QtGui.QColor(10, 132, 255))
+        palette.setColor(QtGui.QPalette.Window, QtGui.QColor(28, 28, 30))
+        palette.setColor(QtGui.QPalette.WindowText, QtGui.QColor(224, 224, 224))
+        palette.setColor(QtGui.QPalette.Base, QtGui.QColor(22, 22, 23))
+        palette.setColor(QtGui.QPalette.AlternateBase, QtGui.QColor(44, 44, 46))
+        palette.setColor(QtGui.QPalette.ToolTipBase, QtGui.QColor(58, 58, 60))
+        palette.setColor(QtGui.QPalette.ToolTipText, QtGui.QColor(224, 224, 224))
+        palette.setColor(QtGui.QPalette.Text, QtGui.QColor(224, 224, 224))
+        palette.setColor(QtGui.QPalette.Button, QtGui.QColor(58, 58, 60))
+        palette.setColor(QtGui.QPalette.ButtonText, QtGui.QColor(224, 224, 224))
+        palette.setColor(QtGui.QPalette.BrightText, QtGui.QColor(255, 255, 255))
+        palette.setColor(QtGui.QPalette.Link, QtGui.QColor(10, 132, 255))
+        palette.setColor(QtGui.QPalette.Highlight, QtGui.QColor(10, 132, 255))
         palette.setColor(QtGui.QPalette.HighlightedText, QtGui.QColor(255, 255, 255))
-        palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.WindowText,
-                         QtGui.QColor(127, 127, 127))
-        palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.Text,
-                         QtGui.QColor(127, 127, 127))
-        palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.ButtonText,
-                         QtGui.QColor(127, 127, 127))
-        palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.Highlight,
-                         QtGui.QColor(58, 58, 60))
-        palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.HighlightedText,
-                         QtGui.QColor(127, 127, 127))
+        palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.WindowText, QtGui.QColor(127, 127, 127))
+        palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.Text, QtGui.QColor(127, 127, 127))
+        palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.ButtonText, QtGui.QColor(127, 127, 127))
+        palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.Highlight, QtGui.QColor(58, 58, 60))
+        palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.HighlightedText, QtGui.QColor(127, 127, 127))
         QApplication.setPalette(palette)
         QApplication.instance().setStyleSheet("""
             QMainWindow { background-color: #1c1c1e; }
             QWidget { background-color: #1c1c1e; color: #e0e0e0; }
-            QLineEdit {
-                background-color: #2c2c2e; border: 1px solid #3a3a3c;
-                border-radius: 6px; padding: 4px 10px; color: #e0e0e0;
-                selection-background-color: #0066CC;
-            }
+            QLineEdit { background-color: #2c2c2e; border: 1px solid #3a3a3c; border-radius: 6px; padding: 4px 10px; color: #e0e0e0; selection-background-color: #0066CC; }
             QLineEdit:focus { border: 1px solid #0066CC; }
-            QListWidget {
-                background-color: #1c1c1e; border: 1px solid #3a3a3c;
-                border-radius: 8px; color: #e0e0e0; outline: none;
-            }
+            QListWidget { background-color: #1c1c1e; border: 1px solid #3a3a3c; border-radius: 8px; color: #e0e0e0; outline: none; }
             QListWidget::item:selected { background-color: #0066CC; color: white; }
             QListWidget::item:hover    { background-color: #2c2c2e; }
         """)
 
-    # ── Window state ──────────────────────────────────────────────────────────
-
     def closeEvent(self, event):
-        self.settings.setValue("geometry",    self.saveGeometry())
+        self.settings.setValue("geometry", self.saveGeometry())
         self.settings.setValue("windowState", self.saveState())
         if self.folder:
             self.settings.setValue("last_folder", self.folder)
         super().closeEvent(event)
 
-    # ── Search ────────────────────────────────────────────────────────────────
-
     def reset_search_index(self, search_bar):
         self.last_search_index[search_bar] = -1
-
-    # ── Double-click handlers ─────────────────────────────────────────────────
 
     def handle_double_left_click(self, name, path):
         name_without_ext = os.path.splitext(name)[0]
@@ -3271,9 +3014,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         if os.path.exists(path):
             pix = QtGui.QPixmap(path)
             if not pix.isNull():
-                scaled = pix.scaled(
-                    self.preview.size() - QtCore.QSize(20, 20),
-                    Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                scaled = pix.scaled(self.preview.size() - QtCore.QSize(20, 20), Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 self.preview.setPixmap(scaled)
 
     def handle_double_right_click(self, name):
@@ -3282,12 +3023,9 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.preview_locked = False
         self.update_preview()
 
-    # ── Folder operations ─────────────────────────────────────────────────────
-
     def open_folder(self):
         start_dir = self.folder or ""
-        folder = QtWidgets.QFileDialog.getExistingDirectory(
-            self, "Select Image Folder", start_dir)
+        folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Select Image Folder", start_dir)
         if not folder:
             return
         self.folder = folder
@@ -3300,7 +3038,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             self._load_gen = 0
         self._load_gen += 1
         my_gen = self._load_gen
-
         self._progress_start()
         QApplication.processEvents()
         self._favorites_filter_active = False
@@ -3308,8 +3045,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.list.clear_overlays()
         self.list.clear()
         self.list.thumbnail_cache.clear()
-        files = [f for f in os.listdir(self.folder)
-                 if os.path.splitext(f)[1].lower() in SUPPORTED_EXT]
+        files = [f for f in os.listdir(self.folder) if os.path.splitext(f)[1].lower() in SUPPORTED_EXT]
         files.sort(key=natural_key)
         total_files = len(files)
         for idx, f in enumerate(files):
@@ -3336,18 +3072,15 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             self.list.setFocus()
         self.current_folder_files = set(files)
         self.update_status_label(in_sync=True)
-        self.setWindowTitle(
-            "Scenify — Image Scene Flow Organizer  ·  Developed by Ivan Sicaja © 2026")
+        self.setWindowTitle("Scenify — Image Scene Flow Organizer  ·  Developed by Ivan Sicaja © 2026")
 
     def check_for_new_files(self):
         if not self.folder or not os.path.isdir(self.folder):
             return
-        current_files = set(f for f in os.listdir(self.folder)
-                            if os.path.splitext(f)[1].lower() in SUPPORTED_EXT)
+        current_files = set(f for f in os.listdir(self.folder) if os.path.splitext(f)[1].lower() in SUPPORTED_EXT)
         known_files = self.current_folder_files
         removed = known_files - current_files
         added   = current_files - known_files
-
         if removed:
             rows_to_remove = []
             for i in range(self.list.count()):
@@ -3356,22 +3089,18 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                     rows_to_remove.append(i)
             for row in reversed(rows_to_remove):
                 star = self.list._star_overlays.pop(row, None)
-                if star:
-                    star.deleteLater()
+                if star: star.deleteLater()
                 tov = self.list._tag_overlays.pop(row, None)
-                if tov:
-                    tov.deleteLater()
+                if tov: tov.deleteLater()
                 self.list.takeItem(row)
             self.list._rebuild_star_index()
             self.list._rebuild_tag_index()
             self.current_folder_files = current_files
-
             fullscreen_open = hasattr(self, '_viewer') and self._viewer is not None
             try:
                 dialog_parent = self._viewer if fullscreen_open else self
             except Exception:
                 dialog_parent = self
-
             removed_sorted = sorted(removed, key=natural_key)
             dialog = QtWidgets.QDialog(dialog_parent)
             dialog.setWindowTitle("Images Removed from Folder")
@@ -3381,45 +3110,24 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             dlg_layout = QtWidgets.QVBoxLayout(dialog)
             dlg_layout.setContentsMargins(16, 16, 16, 16)
             dlg_layout.setSpacing(10)
-            header = QtWidgets.QLabel(
-                f"⚠  {len(removed_sorted)} image{'s' if len(removed_sorted) > 1 else ''} "
-                f"{'were' if len(removed_sorted) > 1 else 'was'} removed from the folder:")
+            header = QtWidgets.QLabel(f"⚠  {len(removed_sorted)} image{'s' if len(removed_sorted) > 1 else ''} {'were' if len(removed_sorted) > 1 else 'was'} removed from the folder:")
             header.setStyleSheet("font-size: 12px; font-weight: 600; color: #ff9f0a;")
             header.setWordWrap(True)
             dlg_layout.addWidget(header)
             list_widget = QtWidgets.QListWidget()
-            list_widget.setStyleSheet("""
-                QListWidget {
-                    background: #2c2c2e; border: 1px solid #3a3a3c;
-                    border-radius: 6px; color: #e0e0e0; font-size: 11px; padding: 4px;
-                }
-                QListWidget::item { padding: 3px 6px; }
-                QScrollBar:vertical { background: #2c2c2e; width: 8px; border-radius: 4px; }
-                QScrollBar::handle:vertical {
-                    background: #3a3a3c; border-radius: 4px; min-height: 20px; }
-                QScrollBar::handle:vertical:hover { background: #0066CC; }
-                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
-            """)
+            list_widget.setStyleSheet("QListWidget { background: #2c2c2e; border: 1px solid #3a3a3c; border-radius: 6px; color: #e0e0e0; font-size: 11px; padding: 4px; } QListWidget::item { padding: 3px 6px; } QScrollBar:vertical { background: #2c2c2e; width: 8px; border-radius: 4px; } QScrollBar::handle:vertical { background: #3a3a3c; border-radius: 4px; min-height: 20px; } QScrollBar::handle:vertical:hover { background: #0066CC; } QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }")
             for name in removed_sorted:
                 list_widget.addItem(name)
             dlg_layout.addWidget(list_widget)
             ok_btn = QtWidgets.QPushButton("OK")
             ok_btn.setFixedHeight(28)
-            ok_btn.setStyleSheet("""
-                QPushButton {
-                    background: #0066CC; color: white; border: none;
-                    border-radius: 5px; font-weight: 600; font-size: 11px; padding: 4px 20px;
-                }
-                QPushButton:hover   { background: #007AFF; }
-                QPushButton:pressed { background: #0051A3; }
-            """)
+            ok_btn.setStyleSheet("QPushButton { background: #0066CC; color: white; border: none; border-radius: 5px; font-weight: 600; font-size: 11px; padding: 4px 20px; } QPushButton:hover { background: #007AFF; } QPushButton:pressed { background: #0051A3; }")
             ok_btn.clicked.connect(dialog.accept)
             btn_row_layout = QtWidgets.QHBoxLayout()
             btn_row_layout.addStretch()
             btn_row_layout.addWidget(ok_btn)
             dlg_layout.addLayout(btn_row_layout)
             dialog.exec_()
-
             if fullscreen_open:
                 try:
                     self._viewer.raise_()
@@ -3438,15 +3146,11 @@ class ImageOrganizer(QtWidgets.QMainWindow):
     def update_status_label(self, in_sync=True, added_count=0, removed_count=0):
         if not self.folder:
             self.status_label.setText("No folder opened")
-            self.status_label.setStyleSheet(
-                "font-size: 10px; padding: 2px 6px; color: #a0a0a0; background: #1c1c1e; "
-                "border-radius: 5px; border: 1px solid #3a3a3c;")
+            self.status_label.setStyleSheet("font-size: 10px; padding: 2px 6px; color: #a0a0a0; background: #1c1c1e; border-radius: 5px; border: 1px solid #3a3a3c;")
             return
         if in_sync:
             self.status_label.setText("✓  All images loaded")
-            self.status_label.setStyleSheet(
-                "font-size: 10px; padding: 2px 6px; color: #30d158; font-weight: 600; "
-                "background: #1c1c1e; border-radius: 5px; border: 1px solid #30d158;")
+            self.status_label.setStyleSheet("font-size: 10px; padding: 2px 6px; color: #30d158; font-weight: 600; background: #1c1c1e; border-radius: 5px; border: 1px solid #30d158;")
         else:
             if added_count > 0 and removed_count == 0:
                 msg = f"＋{added_count} new image{'s' if added_count > 1 else ''} — Reload folder"
@@ -3455,31 +3159,21 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             else:
                 msg = f"＋{added_count} / −{removed_count} images changed — Reload folder"
             self.status_label.setText(f"⚠  {msg}")
-            self.status_label.setStyleSheet(
-                "font-size: 10px; padding: 2px 6px; color: #ff9f0a; font-weight: 600; "
-                "background: #1c1c1e; border-radius: 5px; border: 1px solid #ff9f0a;")
+            self.status_label.setStyleSheet("font-size: 10px; padding: 2px 6px; color: #ff9f0a; font-weight: 600; background: #1c1c1e; border-radius: 5px; border: 1px solid #ff9f0a;")
 
     def reload_folder(self):
         if not self.folder:
             QtWidgets.QMessageBox.warning(self, "Error", "No folder loaded!")
             return
-        reply = QtWidgets.QMessageBox.question(
-            self, "Reload Folder",
-            "This will load any new images from the folder.\n"
-            "Existing images keep their current names.\n\nContinue?",
-            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+        reply = QtWidgets.QMessageBox.question(self, "Reload Folder", "This will load any new images from the folder.\nExisting images keep their current names.\n\nContinue?", QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
         if reply != QtWidgets.QMessageBox.Yes:
             return
-
         self._progress_start()
         QApplication.processEvents()
-
         existing_names = {self.list.item(i).text() for i in range(self.list.count())}
-        disk_files = [f for f in os.listdir(self.folder)
-                      if os.path.splitext(f)[1].lower() in SUPPORTED_EXT]
+        disk_files = [f for f in os.listdir(self.folder) if os.path.splitext(f)[1].lower() in SUPPORTED_EXT]
         new_files = [f for f in disk_files if f not in existing_names]
         new_files.sort(key=natural_key)
-
         existing_on_disk = set(os.listdir(self.folder))
         counter = 0
         _generic_re = re.compile(r"^generic_(\d+)\.", re.IGNORECASE)
@@ -3487,7 +3181,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             _m = _generic_re.match(_fn)
             if _m:
                 counter = max(counter, int(_m.group(1)) + 1)
-
         new_paths = []
         for f in new_files:
             old_path = os.path.join(self.folder, f)
@@ -3507,7 +3200,6 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             except Exception:
                 pass
             counter += 1
-
         total = len(new_paths)
         for idx, new_path in enumerate(new_paths):
             fname = os.path.basename(new_path)
@@ -3520,97 +3212,71 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             self.list.add_tag_for_item(row)
             self.progress_bar.setValue(int(((idx + 1) / max(total, 1)) * 100))
             QApplication.processEvents()
-
         self._progress_done()
         QTimer.singleShot(100, self.list._reposition_overlays)
         QTimer.singleShot(150, self._update_scene_banner)
         QTimer.singleShot(200, self._refresh_tag_jump_combo)
-        final_files = [f for f in os.listdir(self.folder)
-                       if os.path.splitext(f)[1].lower() in SUPPORTED_EXT]
+        final_files = [f for f in os.listdir(self.folder) if os.path.splitext(f)[1].lower() in SUPPORTED_EXT]
         self.current_folder_files = set(final_files)
         self.update_status_label(in_sync=True)
-        self.setWindowTitle(
-            "Scenify — Image Scene Flow Organizer  ·  Developed by Ivan Sicaja © 2026")
+        self.setWindowTitle("Scenify — Image Scene Flow Organizer  ·  Developed by Ivan Sicaja © 2026")
         if new_paths:
-            QtWidgets.QMessageBox.information(
-                self, "Done",
-                f"{len(new_paths)} new image{'s' if len(new_paths) > 1 else ''} added.")
+            QtWidgets.QMessageBox.information(self, "Done", f"{len(new_paths)} new image{'s' if len(new_paths) > 1 else ''} added.")
         else:
-            QtWidgets.QMessageBox.information(
-                self, "Up to Date", "No new images found in the folder.")
-
-    # ── Thumbnail size sync ───────────────────────────────────────────────────
+            QtWidgets.QMessageBox.information(self, "Up to Date", "No new images found in the folder.")
 
     def update_thumb_size(self, val):
-        if self._thumb_syncing:
-            return
+        if self._thumb_syncing: return
         self._thumb_syncing = True
         self.thumb_spinbox.setValue(val)
         self._thumb_syncing = False
         self.list.setThumbnailSize(val)
 
     def _on_thumb_spinbox_changed(self, val):
-        if self._thumb_syncing:
-            return
+        if self._thumb_syncing: return
         self._thumb_syncing = True
         self.thumb_slider.setValue(val)
         self._thumb_syncing = False
         self.list.setThumbnailSize(val)
 
-    # ── Preview ───────────────────────────────────────────────────────────────
-
     def update_preview(self):
-        if self.preview_locked:
-            return
+        if self.preview_locked: return
         sel = self.list.selectedItems()
         if not sel:
-            self.preview.setText(
-                "Preview\n(Double LEFT-click: lock | Double RIGHT-click: unlock)")
+            self.preview.setText("Preview\n(Double LEFT-click: lock | Double RIGHT-click: unlock)")
             self.preview.setPixmap(QtGui.QPixmap())
             return
         path = sel[0].data(Qt.UserRole)
         if os.path.exists(path):
             pix = QtGui.QPixmap(path)
             if not pix.isNull():
-                scaled = pix.scaled(
-                    self.preview.size() - QtCore.QSize(20, 20),
-                    Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                scaled = pix.scaled(self.preview.size() - QtCore.QSize(20, 20), Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 self.preview.setPixmap(scaled)
 
     def update_preview_from_current(self, current, previous):
-        if self.preview_locked or current is None:
-            return
+        if self.preview_locked or current is None: return
         path = current.data(Qt.UserRole)
         if path and os.path.exists(path):
             pix = QtGui.QPixmap(path)
             if not pix.isNull():
-                scaled = pix.scaled(
-                    self.preview.size() - QtCore.QSize(20, 20),
-                    Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                scaled = pix.scaled(self.preview.size() - QtCore.QSize(20, 20), Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 self.preview.setPixmap(scaled)
 
     def update_preview_from_path(self, path):
-        if self.preview_locked:
-            return
+        if self.preview_locked: return
         if path and os.path.exists(path):
             pix = QtGui.QPixmap(path)
             if not pix.isNull():
-                scaled = pix.scaled(
-                    self.preview.size() - QtCore.QSize(20, 20),
-                    Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                scaled = pix.scaled(self.preview.size() - QtCore.QSize(20, 20), Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 self.preview.setPixmap(scaled)
-
-    # ── Move to top/bottom ────────────────────────────────────────────────────
 
     def move_to_top(self):
         items = sorted(self.list.selectedItems(), key=lambda x: self.list.row(x))
-        if not items:
-            return
+        if not items: return
         self._save_scroll_back_position(self.list.row(items[0]))
         self.list.setUpdatesEnabled(False)
         for item in reversed(items):
             self.list.takeItem(self.list.row(item))
-        # FIXED: use selectionModel().clearSelection() for clean state
         self.list.selectionModel().clearSelection()
         for i, item in enumerate(items):
             self.list.insertItem(i, item)
@@ -3624,13 +3290,11 @@ class ImageOrganizer(QtWidgets.QMainWindow):
 
     def move_to_bottom(self):
         items = sorted(self.list.selectedItems(), key=lambda x: self.list.row(x))
-        if not items:
-            return
+        if not items: return
         self._save_scroll_back_position(self.list.row(items[0]))
         self.list.setUpdatesEnabled(False)
         for item in reversed(items):
             self.list.takeItem(self.list.row(item))
-        # FIXED: use selectionModel().clearSelection() for clean state
         self.list.selectionModel().clearSelection()
         base = self.list.count()
         for i, item in enumerate(items):
@@ -3643,224 +3307,94 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.list._rebuild_tag_index()
         QTimer.singleShot(50, self.list._reposition_overlays)
 
-    # ── NEW: Move to Tag ──────────────────────────────────────────────────────
-
     def _get_tag_groups(self):
-        """
-        Scan all tag overlays and return a list of tag groups, ordered by row.
-
-        Each group is a dict:
-          {
-            'tag':       str,   # the tag text
-            'tag_row':   int,   # row of the tagged image (scene marker)
-            'start':     int,   # first row in the group (= tag_row)
-            'end':       int,   # last row in the group (inclusive)
-          }
-
-        A tag group starts at the tagged image and extends until the row
-        before the next tagged image (or end of list).
-        """
         total = self.list.count()
-        if total == 0:
-            return []
-
-        # Collect all rows that have a non-empty tag, sorted by row
+        if total == 0: return []
         tagged_rows = []
         for row, tov in sorted(self.list._tag_overlays.items()):
             tag_text = tov.get_tag()
             if tag_text:
                 tagged_rows.append((row, tag_text))
-
-        if not tagged_rows:
-            return []
-
+        if not tagged_rows: return []
         groups = []
         for i, (row, tag_text) in enumerate(tagged_rows):
             start = row
-            if i + 1 < len(tagged_rows):
-                end = tagged_rows[i + 1][0] - 1
-            else:
-                end = total - 1
-            groups.append({
-                'tag':     tag_text,
-                'tag_row': row,
-                'start':   start,
-                'end':     end,
-            })
-
+            end = tagged_rows[i + 1][0] - 1 if i + 1 < len(tagged_rows) else total - 1
+            groups.append({'tag': tag_text, 'tag_row': row, 'start': start, 'end': end})
         return groups
 
     def _move_to_tag(self, position='end'):
-        """
-        Move selected images to the top or end of a chosen tag group.
-
-        position='end'  → insert after the last image in the tag group.
-        position='top'  → insert right after the tag marker image.
-
-        Opens a dialog listing all available scene tags. The user picks one
-        and the selected thumbnails are moved there.
-        """
         sel = self.list.selectedItems()
         if not sel:
-            QtWidgets.QMessageBox.warning(
-                self, "No Selection", "Please select at least one image first.")
+            QtWidgets.QMessageBox.warning(self, "No Selection", "Please select at least one image first.")
             return
-
         groups = self._get_tag_groups()
         if not groups:
-            QtWidgets.QMessageBox.information(
-                self, "No Tags",
-                "There are no scene tags in the current list.\n\n"
-                "Select a thumbnail and press T to add a scene tag first.")
+            QtWidgets.QMessageBox.information(self, "No Tags", "There are no scene tags in the current list.\n\nSelect a thumbnail and press T to add a scene tag first.")
             return
-
-        # Build dialog
         dlg = QtWidgets.QDialog(self)
-        dlg.setWindowTitle(
-            "Move to End of Tag" if position == 'end' else "Move to Top of Tag")
+        dlg.setWindowTitle("Move to End of Tag" if position == 'end' else "Move to Top of Tag")
         dlg.setMinimumWidth(420)
-        dlg.setStyleSheet("""
-            QDialog   { background: #1c1c1e; color: #e0e0e0; }
-            QLabel    { color: #a0a0a0; font-size: 11px; background: transparent; border: none; }
-        """)
+        dlg.setStyleSheet("QDialog { background: #1c1c1e; color: #e0e0e0; } QLabel { color: #a0a0a0; font-size: 11px; background: transparent; border: none; }")
         layout = QtWidgets.QVBoxLayout(dlg)
         layout.setContentsMargins(18, 16, 18, 16)
         layout.setSpacing(10)
-
         pos_label = "end" if position == 'end' else "top (right after the tag marker)"
-        header = QtWidgets.QLabel(
-            f"<b style='color:#32ade6;font-size:13px;'>🏷  Move "
-            f"{len(sel)} image{'s' if len(sel) != 1 else ''} "
-            f"to {pos_label} of tag:</b>")
+        header = QtWidgets.QLabel(f"<b style='color:#32ade6;font-size:13px;'>🏷  Move {len(sel)} image{'s' if len(sel) != 1 else ''} to {pos_label} of tag:</b>")
         header.setTextFormat(Qt.RichText)
         header.setWordWrap(True)
         layout.addWidget(header)
-
-        hint = QtWidgets.QLabel(
-            "Select a scene tag below. The selected images will be moved "
-            f"to the {'end' if position == 'end' else 'beginning'} of that "
-            "tag's group in the thumbnail list.")
+        hint = QtWidgets.QLabel(f"Select a scene tag below. The selected images will be moved to the {'end' if position == 'end' else 'beginning'} of that tag's group in the thumbnail list.")
         hint.setWordWrap(True)
         hint.setStyleSheet("color: #636366; font-size: 10px; background: transparent; border: none;")
         layout.addWidget(hint)
-
-        # Tag list
         tag_list = QtWidgets.QListWidget()
-        tag_list.setStyleSheet("""
-            QListWidget {
-                background: #2c2c2e; border: 1px solid #3a3a3c;
-                border-radius: 6px; color: #e0e0e0; font-size: 12px; padding: 4px;
-                outline: none;
-            }
-            QListWidget::item {
-                padding: 6px 10px; border-radius: 4px;
-            }
-            QListWidget::item:selected {
-                background: #0a2a3a; color: #32ade6; border: 1px solid #1a5a80;
-            }
-            QListWidget::item:hover {
-                background: #2a2a2e;
-            }
-            QScrollBar:vertical { background: #2c2c2e; width: 8px; border-radius: 4px; }
-            QScrollBar::handle:vertical {
-                background: #3a3a3c; border-radius: 4px; min-height: 20px; }
-            QScrollBar::handle:vertical:hover { background: #0066CC; }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
-        """)
+        tag_list.setStyleSheet("QListWidget { background: #2c2c2e; border: 1px solid #3a3a3c; border-radius: 6px; color: #e0e0e0; font-size: 12px; padding: 4px; outline: none; } QListWidget::item { padding: 6px 10px; border-radius: 4px; } QListWidget::item:selected { background: #0a2a3a; color: #32ade6; border: 1px solid #1a5a80; } QListWidget::item:hover { background: #2a2a2e; } QScrollBar:vertical { background: #2c2c2e; width: 8px; border-radius: 4px; } QScrollBar::handle:vertical { background: #3a3a3c; border-radius: 4px; min-height: 20px; } QScrollBar::handle:vertical:hover { background: #0066CC; } QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }")
         tag_list.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
-
         for g in groups:
             count = g['end'] - g['start'] + 1
             display = f"🏷  {g['tag']}   ({count} image{'s' if count != 1 else ''})"
             list_item = QtWidgets.QListWidgetItem(display)
             list_item.setData(Qt.UserRole, g)
             tag_list.addItem(list_item)
-
         if tag_list.count() > 0:
             tag_list.setCurrentRow(0)
-
         layout.addWidget(tag_list)
-
-        # Buttons
         btn_row = QtWidgets.QHBoxLayout()
         btn_row.setSpacing(8)
-
         cancel_btn = QtWidgets.QPushButton("Cancel")
         cancel_btn.setFixedHeight(30)
-        cancel_btn.setStyleSheet("""
-            QPushButton {
-                background: #3a3a3c; color: #e0e0e0; border: none;
-                border-radius: 6px; font-weight: 600; font-size: 11px; padding: 4px 18px;
-            }
-            QPushButton:hover { background: #48484a; }
-        """)
+        cancel_btn.setStyleSheet("QPushButton { background: #3a3a3c; color: #e0e0e0; border: none; border-radius: 6px; font-weight: 600; font-size: 11px; padding: 4px 18px; } QPushButton:hover { background: #48484a; }")
         cancel_btn.clicked.connect(dlg.reject)
-
-        move_btn = QtWidgets.QPushButton(
-            f"Move to {'End' if position == 'end' else 'Top'}")
+        move_btn = QtWidgets.QPushButton(f"Move to {'End' if position == 'end' else 'Top'}")
         move_btn.setFixedHeight(30)
         move_btn.setDefault(True)
-        move_btn.setStyleSheet("""
-            QPushButton {
-                background: #0a2a3a; color: #32ade6; border: 1px solid #1a5a80;
-                border-radius: 6px; font-weight: 700; font-size: 11px; padding: 4px 18px;
-            }
-            QPushButton:hover { background: #1a3a5a; color: #5bc8f5; border-color: #2a80c0; }
-            QPushButton:pressed { background: #061422; }
-        """)
+        move_btn.setStyleSheet("QPushButton { background: #0a2a3a; color: #32ade6; border: 1px solid #1a5a80; border-radius: 6px; font-weight: 700; font-size: 11px; padding: 4px 18px; } QPushButton:hover { background: #1a3a5a; color: #5bc8f5; border-color: #2a80c0; } QPushButton:pressed { background: #061422; }")
         move_btn.clicked.connect(dlg.accept)
-
         btn_row.addWidget(cancel_btn)
         btn_row.addStretch()
         btn_row.addWidget(move_btn)
         layout.addLayout(btn_row)
-
-        # Also accept on double-click
         tag_list.itemDoubleClicked.connect(lambda: dlg.accept())
-
-        if dlg.exec_() != QtWidgets.QDialog.Accepted:
-            return
-
+        if dlg.exec_() != QtWidgets.QDialog.Accepted: return
         selected_tag_item = tag_list.currentItem()
-        if selected_tag_item is None:
-            return
+        if selected_tag_item is None: return
         chosen_group = selected_tag_item.data(Qt.UserRole)
-
-        # ── Perform the move ──────────────────────────────────────────────────
-        # Collect selected items in their current order
         move_items = sorted(sel, key=lambda x: self.list.row(x))
-        move_rows  = set(self.list.row(it) for it in move_items)
-
-        # Save the origin row so the user can scroll back after the move
         origin_row = self.list.row(move_items[0])
         self._save_scroll_back_position(origin_row)
-
         self.list.setUpdatesEnabled(False)
-
-        # Take items out (in reverse order to keep indices stable)
         for item in reversed(move_items):
             self.list.takeItem(self.list.row(item))
-
-        # CRITICAL: rebuild tag index NOW so _tag_overlays has correct
-        # row keys after the items were removed.  Without this, the
-        # overlay dict still maps old (pre-removal) row numbers and
-        # the group-end search below looks up stale keys.
         self.list._rebuild_tag_index()
-
-        # Find the tag marker row by scanning the freshly-rebuilt overlays
         tag_marker_row = -1
         for row, tov in self.list._tag_overlays.items():
             if tov.get_tag() == chosen_group['tag']:
                 tag_marker_row = row
                 break
-
         if tag_marker_row < 0:
-            # Tag marker was among the moved items or no longer exists.
-            # Fall back: just put them at the end of the list.
             insert_at = self.list.count()
         else:
-            # Find end of this tag group (next tag or end of list)
-            # using the REBUILT overlay dict with correct row keys
             group_end = self.list.count() - 1
             for row in sorted(self.list._tag_overlays.keys()):
                 if row > tag_marker_row:
@@ -3868,51 +3402,36 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                     if tov.get_tag():
                         group_end = row - 1
                         break
-
             if position == 'end':
                 insert_at = group_end + 1
-            else:  # 'top'
+            else:
                 insert_at = tag_marker_row + 1
-
-        # Insert the items
         self.list.selectionModel().clearSelection()
         for i, item in enumerate(move_items):
             self.list.insertItem(insert_at + i, item)
             item.setSelected(True)
-
         self.list.setUpdatesEnabled(True)
-
-        # Scroll to show the moved items
         if move_items:
             self.list.scrollToItem(move_items[0], QAbstractItemView.PositionAtCenter)
             self._save_scroll_dest_position(insert_at)
-
-        # Rebuild overlays
         self.list._rebuild_star_index()
         self.list._rebuild_tag_index()
         QTimer.singleShot(50, self.list._reposition_overlays)
         QTimer.singleShot(100, self._update_scene_banner)
         QTimer.singleShot(150, self._refresh_tag_jump_combo)
 
-    # ── Rename All ────────────────────────────────────────────────────────────
-
     def rename_ordered(self):
         if not self.folder or self.list.count() == 0:
             QtWidgets.QMessageBox.warning(self, "Error", "No images loaded!")
             return
-        if QtWidgets.QMessageBox.question(
-                self, "Rename All",
-                f"Rename all {self.list.count()} images to 1, 2, 3, etc.?",
-                QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
-        ) != QtWidgets.QMessageBox.Yes:
+        if QtWidgets.QMessageBox.question(self, "Rename All", f"Rename all {self.list.count()} images to 1, 2, 3, etc.?", QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No) != QtWidgets.QMessageBox.Yes:
             return
         self._pause_watcher()
         temp_paths = []
         for i in range(self.list.count()):
             item = self.list.item(i)
             old  = item.data(Qt.UserRole)
-            if not os.path.exists(old):
-                continue
+            if not os.path.exists(old): continue
             ext = os.path.splitext(old)[1]
             tmp = os.path.join(self.folder, f"__TMP_RENAME_{i}{ext}")
             try:
@@ -3920,12 +3439,10 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                 self.list.update_star_path(old, tmp)
                 self.list.update_tag_path(old, tmp)
                 temp_paths.append((item, tmp, ext))
-            except Exception:
-                continue
+            except Exception: continue
         renamed = 0
         for idx, (item, tmp, ext) in enumerate(temp_paths, start=1):
-            if not os.path.exists(tmp):
-                continue
+            if not os.path.exists(tmp): continue
             new = os.path.join(self.folder, f"{idx}{ext}")
             try:
                 os.rename(tmp, new)
@@ -3934,37 +3451,27 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                 item.setData(Qt.UserRole, new)
                 item.setText(os.path.basename(new))
                 renamed += 1
-            except Exception:
-                continue
+            except Exception: continue
         QtWidgets.QMessageBox.information(self, "Done", f"Renamed {renamed} images!")
         self._resume_watcher()
-
-    # ── Rename Selected ───────────────────────────────────────────────────────
 
     def rename_selected(self):
         sel = self.list.selectedItems()
         if not sel:
-            QtWidgets.QMessageBox.warning(
-                self, "No Selection", "Please select at least one image.")
+            QtWidgets.QMessageBox.warning(self, "No Selection", "Please select at least one image.")
             return
         base = self.rename_base_input.text().strip()
         if not base:
-            QtWidgets.QMessageBox.warning(
-                self, "No Base Name",
-                "Please enter a base name in the 'Base Name' field below the "
-                "Rename Selected button.")
+            QtWidgets.QMessageBox.warning(self, "No Base Name", "Please enter a base name in the 'Base Name' field below the Rename Selected button.")
             self.rename_base_input.setFocus()
             return
         self._pause_watcher()
         digits        = self.digits_spinbox.value()
         renamed_items = sorted(sel, key=lambda x: self.list.row(x))
-        pattern       = re.compile(
-            rf"^{re.escape(base)}_(\d{{{digits}}})\.[a-zA-Z]{{3,4}}$", re.IGNORECASE)
-        pattern_any   = re.compile(
-            rf"^{re.escape(base)}_(\d+)\.[a-zA-Z]{{3,4}}$", re.IGNORECASE)
+        pattern       = re.compile(rf"^{re.escape(base)}_(\d{{{digits}}})\.[a-zA-Z]{{3,4}}$", re.IGNORECASE)
+        pattern_any   = re.compile(rf"^{re.escape(base)}_(\d+)\.[a-zA-Z]{{3,4}}$", re.IGNORECASE)
         selected_texts = {item.text() for item in renamed_items}
-        used_names = {self.list.item(i).text() for i in range(self.list.count())
-                      if self.list.item(i).text() not in selected_texts}
+        used_names = {self.list.item(i).text() for i in range(self.list.count()) if self.list.item(i).text() not in selected_texts}
         max_counter_excl = 0
         for name in used_names:
             match = pattern_any.match(name)
@@ -3974,8 +3481,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         new_items = []
         for item in renamed_items:
             old_path = item.data(Qt.UserRole)
-            if not os.path.exists(old_path):
-                continue
+            if not os.path.exists(old_path): continue
             ext      = os.path.splitext(old_path)[1]
             new_name = f"{base}_{str(counter).zfill(digits)}{ext}"
             while new_name in used_names:
@@ -3991,31 +3497,21 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                 used_names.add(new_name)
                 new_items.append(item)
                 counter += 1
-            except Exception:
-                continue
+            except Exception: continue
         if not new_items:
             self._resume_watcher()
             return
         rows = sorted([self.list.row(itm) for itm in new_items], reverse=True)
         for r in rows:
             self.list.takeItem(r)
-        insert_at = 0
+        # FIXED: Always use natural sort to find the correct insertion position
+        # so renamed images land in proper alphabetical order
+        sample_key = natural_key(new_items[0].text())
+        insert_at = self.list.count()  # default: append at end
         for i in range(self.list.count()):
-            name = self.list.item(i).text()
-            if pattern.match(name):
-                insert_at = i + 1
-            else:
-                if insert_at > 0:
-                    break
-        if insert_at == 0:
-            sample = new_items[0].text()
-            for i in range(self.list.count()):
-                if natural_key(self.list.item(i).text()) > natural_key(sample):
-                    insert_at = i
-                    break
-            else:
-                insert_at = self.list.count()
-        # FIXED: use selectionModel().clearSelection() for clean state
+            if natural_key(self.list.item(i).text()) > sample_key:
+                insert_at = i
+                break
         self.list.selectionModel().clearSelection()
         for i, item in enumerate(new_items):
             self.list.insertItem(insert_at + i, item)
@@ -4025,18 +3521,13 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.list._rebuild_star_index()
         self.list._rebuild_tag_index()
         QTimer.singleShot(50, self.list._reposition_overlays)
-        QtWidgets.QMessageBox.information(
-            self, "Success",
-            f"Renamed and placed {len(new_items)} images perfectly!")
+        QtWidgets.QMessageBox.information(self, "Success", f"Renamed and placed {len(new_items)} images perfectly!")
         self._resume_watcher()
-
-    # ── Re-enumerate by Base Name ─────────────────────────────────────────────
 
     def renumber_by_base(self):
         base = self.rename_base_input.text().strip()
         if not base:
-            QtWidgets.QMessageBox.warning(
-                self, "No Base Name", "Please enter a base name first.")
+            QtWidgets.QMessageBox.warning(self, "No Base Name", "Please enter a base name first.")
             self.rename_base_input.setFocus()
             return
         if not self.folder:
@@ -4044,39 +3535,30 @@ class ImageOrganizer(QtWidgets.QMainWindow):
             return
         self._pause_watcher()
         digits      = self.digits_spinbox.value()
-        pattern_any = re.compile(
-            rf"^{re.escape(base)}_(\d+)\.[a-zA-Z]{{3,4}}$", re.IGNORECASE)
-        matching = [self.list.item(i)
-                    for i in range(self.list.count())
-                    if pattern_any.match(self.list.item(i).text())]
+        pattern_any = re.compile(rf"^{re.escape(base)}_(\d+)\.[a-zA-Z]{{3,4}}$", re.IGNORECASE)
+        matching = [self.list.item(i) for i in range(self.list.count()) if pattern_any.match(self.list.item(i).text())]
         if not matching:
-            QtWidgets.QMessageBox.information(
-                self, "Nothing Found",
-                f"No images with base name '{base}' were found in the list.")
+            QtWidgets.QMessageBox.information(self, "Nothing Found", f"No images with base name '{base}' were found in the list.")
             return
         temp_entries = []
         for i, item in enumerate(matching):
             old_path = item.data(Qt.UserRole)
-            if not os.path.exists(old_path):
-                continue
+            if not os.path.exists(old_path): continue
             ext      = os.path.splitext(old_path)[1]
             tmp_path = os.path.join(self.folder, f"__RENUM_{i}{ext}")
             try:
                 os.rename(old_path, tmp_path)
                 if old_path in self.list.thumbnail_cache:
-                    self.list.thumbnail_cache[tmp_path] = \
-                        self.list.thumbnail_cache.pop(old_path)
+                    self.list.thumbnail_cache[tmp_path] = self.list.thumbnail_cache.pop(old_path)
                 self.list.update_star_path(old_path, tmp_path)
                 self.list.update_tag_path(old_path, tmp_path)
                 item.setData(Qt.UserRole, tmp_path)
                 temp_entries.append((item, tmp_path, ext))
-            except Exception:
-                continue
+            except Exception: continue
         renamed = 0
         renamed_items_ordered = []
         for seq, (item, tmp_path, ext) in enumerate(temp_entries, start=1):
-            if not os.path.exists(tmp_path):
-                continue
+            if not os.path.exists(tmp_path): continue
             new_name = f"{base}_{str(seq).zfill(digits)}{ext}"
             new_path = os.path.join(self.folder, new_name)
             try:
@@ -4084,115 +3566,67 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                 item.setText(new_name)
                 item.setData(Qt.UserRole, new_path)
                 if tmp_path in self.list.thumbnail_cache:
-                    self.list.thumbnail_cache[new_path] = \
-                        self.list.thumbnail_cache.pop(tmp_path)
+                    self.list.thumbnail_cache[new_path] = self.list.thumbnail_cache.pop(tmp_path)
                 self.list.update_star_path(tmp_path, new_path)
                 self.list.update_tag_path(tmp_path, new_path)
                 renamed += 1
                 renamed_items_ordered.append(item)
-            except Exception:
-                continue
+            except Exception: continue
         if renamed_items_ordered:
             first_row = min(self.list.row(it) for it in renamed_items_ordered)
-            rows = sorted([self.list.row(it) for it in renamed_items_ordered],
-                          reverse=True)
+            rows = sorted([self.list.row(it) for it in renamed_items_ordered], reverse=True)
             for r in rows:
                 self.list.takeItem(r)
-            # FIXED: use selectionModel().clearSelection() for clean state
             self.list.selectionModel().clearSelection()
             for i, it in enumerate(renamed_items_ordered):
                 self.list.insertItem(first_row + i, it)
                 it.setSelected(True)
-            self.list.scrollToItem(
-                renamed_items_ordered[0], QAbstractItemView.PositionAtCenter)
+            self.list.scrollToItem(renamed_items_ordered[0], QAbstractItemView.PositionAtCenter)
         self.list._rebuild_star_index()
         self.list._rebuild_tag_index()
         QTimer.singleShot(50, self.list._reposition_overlays)
-        QtWidgets.QMessageBox.information(
-            self, "Done",
-            f"Re-enumerated {renamed} images with base name '{base}'.")
+        QtWidgets.QMessageBox.information(self, "Done", f"Re-enumerated {renamed} images with base name '{base}'.")
         self._resume_watcher()
-
-    # ── Export Favorites ──────────────────────────────────────────────────────
 
     def export_favorites(self):
         if not self.folder:
-            QtWidgets.QMessageBox.warning(
-                self, "No Folder", "Please open a folder first.")
+            QtWidgets.QMessageBox.warning(self, "No Folder", "Please open a folder first.")
             return
-
         starred_paths = []
         for i in range(self.list.count()):
             item = self.list.item(i)
-            if item is None:
-                continue
+            if item is None: continue
             star = self.list._star_overlays.get(i)
             if star and star.is_starred():
                 path = item.data(Qt.UserRole)
                 if path and os.path.isfile(path):
                     starred_paths.append(path)
-
         if not starred_paths:
-            QtWidgets.QMessageBox.information(
-                self, "No Favorites",
-                "No images are marked as favorites (★) in the current list.\n\n"
-                "Select a thumbnail and press S, or click its ★ overlay, to star it.")
+            QtWidgets.QMessageBox.information(self, "No Favorites", "No images are marked as favorites (★) in the current list.\n\nSelect a thumbnail and press S, or click its ★ overlay, to star it.")
             return
-
         dest_folder  = os.path.join(self.folder, "00_favorites")
         folder_exists = os.path.isdir(dest_folder)
-
         if folder_exists:
-            existing_count = len([
-                f for f in os.listdir(dest_folder)
-                if os.path.splitext(f)[1].lower() in {
-                    ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp", ".tif"}
-            ])
-            confirm_msg = (
-                f"Export {len(starred_paths)} starred image"
-                f"{'s' if len(starred_paths) != 1 else ''} to:\n\n"
-                f"  {dest_folder}\n\n"
-                f"⚠  This folder already exists and contains {existing_count} image"
-                f"{'s' if existing_count != 1 else ''}.\n"
-                "All existing images in it will be deleted and replaced with the current favorites.\n\n"
-                "Originals in the main folder are not affected. Continue?"
-            )
+            existing_count = len([f for f in os.listdir(dest_folder) if os.path.splitext(f)[1].lower() in {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp", ".tif"}])
+            confirm_msg = (f"Export {len(starred_paths)} starred image{'s' if len(starred_paths) != 1 else ''} to:\n\n  {dest_folder}\n\n⚠  This folder already exists and contains {existing_count} image{'s' if existing_count != 1 else ''}.\nAll existing images in it will be deleted and replaced with the current favorites.\n\nOriginals in the main folder are not affected. Continue?")
         else:
-            confirm_msg = (
-                f"Export {len(starred_paths)} starred image"
-                f"{'s' if len(starred_paths) != 1 else ''} to:\n\n"
-                f"  {dest_folder}\n\n"
-                "Originals will not be moved or changed. Continue?"
-            )
-
-        reply = QtWidgets.QMessageBox.question(
-            self, "Export Favorites", confirm_msg,
-            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
-        if reply != QtWidgets.QMessageBox.Yes:
-            return
-
+            confirm_msg = (f"Export {len(starred_paths)} starred image{'s' if len(starred_paths) != 1 else ''} to:\n\n  {dest_folder}\n\nOriginals will not be moved or changed. Continue?")
+        reply = QtWidgets.QMessageBox.question(self, "Export Favorites", confirm_msg, QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+        if reply != QtWidgets.QMessageBox.Yes: return
         import shutil
-
         if folder_exists:
             try:
                 shutil.rmtree(dest_folder)
             except Exception as e:
-                QtWidgets.QMessageBox.critical(
-                    self, "Error",
-                    f"Could not clear existing folder:\n{dest_folder}\n\n{e}")
+                QtWidgets.QMessageBox.critical(self, "Error", f"Could not clear existing folder:\n{dest_folder}\n\n{e}")
                 return
-
         try:
             os.makedirs(dest_folder, exist_ok=True)
         except Exception as e:
-            QtWidgets.QMessageBox.critical(
-                self, "Error",
-                f"Could not create destination folder:\n{dest_folder}\n\n{e}")
+            QtWidgets.QMessageBox.critical(self, "Error", f"Could not create destination folder:\n{dest_folder}\n\n{e}")
             return
-
         copied = 0
         errors = []
-
         for src_path in starred_paths:
             fname    = os.path.basename(src_path)
             dst_path = os.path.join(dest_folder, fname)
@@ -4201,30 +3635,20 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                 copied += 1
             except Exception as e:
                 errors.append(f"{fname}: {e}")
-
         parts = [f"✓  {copied} image{'s' if copied != 1 else ''} exported."]
         if errors:
-            parts.append(f"✗  {len(errors)} error{'s' if len(errors) != 1 else ''}:\n"
-                         + "\n".join(errors[:5])
-                         + ("\n…" if len(errors) > 5 else ""))
-
+            parts.append(f"✗  {len(errors)} error{'s' if len(errors) != 1 else ''}:\n" + "\n".join(errors[:5]) + ("\n…" if len(errors) > 5 else ""))
         msg = "\n".join(parts) + f"\n\nDestination:\n{dest_folder}"
-
         if errors:
             QtWidgets.QMessageBox.warning(self, "Export Favorites — Done", msg)
         else:
             QtWidgets.QMessageBox.information(self, "Export Favorites — Done", msg)
 
-    # ── Search ────────────────────────────────────────────────────────────────
-
     def search_image(self, search_bar, prev=False):
-        text = (self.search_input1.text() if search_bar == 1
-                else self.search_input2.text()).strip().lower()
-        if not text:
-            return
+        text = (self.search_input1.text() if search_bar == 1 else self.search_input2.text()).strip().lower()
+        if not text: return
         total = self.list.count()
-        if total == 0:
-            return
+        if total == 0: return
         start_index = self.last_search_index[search_bar]
         if start_index == -1:
             selected = self.list.selectedItems()
