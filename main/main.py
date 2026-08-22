@@ -2107,7 +2107,7 @@ class ImageOrganizer(QtWidgets.QMainWindow):
         self.rename_all_btn.setFixedHeight(26)
         self.rename_all_btn.clicked.connect(self.rename_ordered)
 
-        self.rename_selected_btn = QtWidgets.QPushButton("Rename Selected")
+        self.rename_selected_btn = QtWidgets.QPushButton("Rename Selected  (Ctrl+R)")
         self.rename_selected_btn.setStyleSheet(blue_btn_style)
         self.rename_selected_btn.setFixedHeight(26)
         self.rename_selected_btn.clicked.connect(self.rename_selected)
@@ -2691,8 +2691,13 @@ class ImageOrganizer(QtWidgets.QMainWindow):
                     self._open_fullscreen(row)
             event.accept()
             return
-        if event.key() in (Qt.Key_S, Qt.Key_D) and not in_text:
+        if event.key() in (Qt.Key_S, Qt.Key_D, Qt.Key_G) and not in_text:
             self.list.keyPressEvent(event)
+            return
+        if event.key() == Qt.Key_R and event.modifiers() & Qt.ControlModifier:
+            if self._rename_unlocked:
+                self.rename_selected()
+            event.accept()
             return
         super().keyPressEvent(event)
 
